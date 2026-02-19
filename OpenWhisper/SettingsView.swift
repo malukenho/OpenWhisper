@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct SettingsView: View {
     @ObservedObject var manager: TranscriptionManager
@@ -8,6 +9,32 @@ struct SettingsView: View {
         VStack(spacing: 20) {
             Text("Global Shortcut Configuration")
                 .font(.headline)
+            
+            HStack {
+                Text("Accessibility Permissions:")
+                Text(manager.isAccessibilityTrusted ? "✅ Granted" : "❌ Missing")
+                    .foregroundColor(manager.isAccessibilityTrusted ? .green : .red)
+                    .bold()
+                
+                Button("Check Again") {
+                    manager.objectWillChange.send()
+                }
+                .buttonStyle(.link)
+            }
+            .font(.subheadline)
+            
+            if !manager.isAccessibilityTrusted {
+                VStack(spacing: 8) {
+                    Text("Required for Global Hotkey and Text Insertion")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                    
+                    Button("Open System Settings") {
+                        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
             
             VStack(alignment: .leading, spacing: 10) {
                 Text("Current Shortcut:")

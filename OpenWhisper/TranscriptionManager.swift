@@ -12,6 +12,11 @@ class TranscriptionManager: ObservableObject {
     @AppStorage("shortcutKeyCode") var shortcutKeyCode: Int = 37 // Default 'L'
     @AppStorage("shortcutModifiers") var shortcutModifiers: Int = 1179648 // Default Cmd+Shift
     
+    var isAccessibilityTrusted: Bool {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        return AXIsProcessTrustedWithOptions(options as CFDictionary)
+    }
+    
     private let recorder = AudioRecorder()
     private let whisper = WhisperService()
     private var overlayWindow: NSWindow?
@@ -123,17 +128,26 @@ class TranscriptionManager: ObservableObject {
     }
     
     func setupHotkey() {
+        print("Setting up hotkey: \(shortcutKeyCode) with modifiers \(shortcutModifiers)")
+        
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
         }
         
+        // Check for accessibility permissions
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        let isTrusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        print("Accessibility permissions trusted: \(isTrusted)")
+        
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return }
             
-            print("Global Key Event: \(event.keyCode), Modifiers: \(event.modifierFlags.rawValue)")
-            
             let currentModifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue
+            
+            // Debug: print(String(format: "Key: %d, Mod: 0x%08X", event.keyCode, currentModifiers))
+            
             if Int(currentModifiers) == self.shortcutModifiers && Int(event.keyCode) == self.shortcutKeyCode {
+                print("Hotkey triggered!")
                 DispatchQueue.main.async {
                     self.toggleRecording()
                 }
