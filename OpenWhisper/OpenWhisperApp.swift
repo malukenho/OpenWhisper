@@ -9,9 +9,26 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     let manager = TranscriptionManager()
+    var settingsWindow: NSWindow?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         manager.setupHotkey()
+    }
+    
+    @objc func openSettings() {
+        if settingsWindow == nil {
+            let contentView = SettingsView(manager: manager)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 350, height: 250),
+                styleMask: [.titled, .closable, .miniaturizable],
+                backing: .buffered, defer: false)
+            window.title = "OpenWhisper Settings"
+            window.contentView = NSHostingView(rootView: contentView)
+            window.center()
+            settingsWindow = window
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
@@ -23,14 +40,12 @@ struct OpenWhisperApp: App {
         MenuBarExtra {
             if appDelegate.manager.isRecording {
                 Text("🔴 Recording...")
-                Text("Press Cmd+Shift+L to stop")
+                Text("Press Stop to transcribe")
                     .font(.caption)
             } else if appDelegate.manager.isTranscribing {
                 Text("⌛ Transcribing...")
             } else {
                 Text("Ready")
-                Text("Hotkey: Cmd+Shift+L")
-                    .font(.caption)
             }
             
             Divider()
@@ -39,6 +54,11 @@ struct OpenWhisperApp: App {
                 appDelegate.manager.toggleRecording()
             }
             .keyboardShortcut("r")
+            
+            Button("Settings...") {
+                appDelegate.openSettings()
+            }
+            .keyboardShortcut(",")
             
             Divider()
             

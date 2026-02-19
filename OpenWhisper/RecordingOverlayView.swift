@@ -7,41 +7,73 @@ struct RecordingOverlayView: View {
     let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        HStack(spacing: 15) {
-            // Cancel Button
-            Button(action: {
-                manager.cancelRecording()
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.gray)
-            }
-            .buttonStyle(.plain)
-
-            // Waveform
-            HStack(spacing: 3) {
-                ForEach(0..<audioLevels.count, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.white)
-                        .frame(width: 3, height: max(4, audioLevels[index] * 40))
+        ZStack {
+            if manager.isTranscribing {
+                TimelineView(.animation) { timeline in
+                    let phase = CGFloat(timeline.date.timeIntervalSinceReferenceDate.remainder(dividingBy: 1.5) / 1.5)
+                    
+                    Text("Transcribing...")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white.opacity(0.4))
+                        .overlay(
+                            GeometryReader { geo in
+                                Text("Transcribing...")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .mask(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [.clear, .white, .clear]),
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                        .frame(width: geo.size.width * 0.5)
+                                        .offset(x: -geo.size.width + (phase * geo.size.width * 2))
+                                    )
+                            }
+                        )
                 }
-            }
-            .frame(width: 80, height: 40)
+                .transition(.opacity)
+            } else {
+                HStack(spacing: 30) {
+                    // Cancel Button
+                    Button(action: {
+                        manager.cancelRecording()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.gray)
+                    }
+                    .buttonStyle(.plain)
 
-            // Stop Button
-            Button(action: {
-                manager.toggleRecording()
-            }) {
-                Image(systemName: "stop.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.red)
+                    // Waveform
+                    HStack(spacing: 3) {
+                        ForEach(0..<audioLevels.count, id: \.self) { index in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.white)
+                                .frame(width: 3, height: max(4, audioLevels[index] * 40))
+                        }
+                    }
+                    .frame(width: 100, height: 40)
+
+                    // Stop Button
+                    Button(action: {
+                        manager.toggleRecording()
+                    }) {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .transition(.opacity)
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 15)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 25)
+        .padding(.vertical, 12)
+        .frame(minWidth: 240, minHeight: 64)
         .background(Color.black.opacity(0.8))
         .clipShape(Capsule())
+        .animation(.easeInOut, value: manager.isTranscribing)
         .onReceive(timer) { _ in
             if manager.isRecording {
                 let level = manager.getAudioLevel()

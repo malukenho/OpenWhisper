@@ -27,8 +27,8 @@ class WhisperService {
             audioURL.path,
             "--output_dir", outputDir.path,
             "--output_format", "txt",
-            "--model", "base",
-            "--language", "en"
+            // "--language", "en", force a language
+            "--model", "base"
         ]
         
         let pipe = Pipe()

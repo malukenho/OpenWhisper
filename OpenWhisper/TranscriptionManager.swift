@@ -8,9 +8,14 @@ class TranscriptionManager: ObservableObject {
     @Published var isRecording = false
     @Published var isTranscribing = false
     
+    // Persistent shortcut settings
+    @AppStorage("shortcutKeyCode") var shortcutKeyCode: Int = 37 // Default 'L'
+    @AppStorage("shortcutModifiers") var shortcutModifiers: Int = 1179648 // Default Cmd+Shift
+    
     private let recorder = AudioRecorder()
     private let whisper = WhisperService()
     private var overlayWindow: NSWindow?
+    private var eventMonitor: Any?
     
     func toggleRecording() {
         if isRecording {
@@ -41,7 +46,6 @@ class TranscriptionManager: ObservableObject {
                     self.showOverlay()
                 } else {
                     print("Microphone access denied.")
-                    // Optional: Show an alert or notification
                 }
             }
         }
@@ -51,19 +55,21 @@ class TranscriptionManager: ObservableObject {
         NSSound(named: "Pop")?.play()
         isRecording = false
         isTranscribing = true
-        hideOverlay()
         
         if let audioURL = recorder.stopRecording() {
             whisper.transcribe(audioURL: audioURL) { text in
                 DispatchQueue.main.async {
-                    self.isTranscribing = false
                     if let text = text, !text.isEmpty {
                         self.insertText(text)
+                    } else {
+                        self.isTranscribing = false
+                        self.hideOverlay()
                     }
                 }
             }
         } else {
             isTranscribing = false
+            hideOverlay()
         }
     }
 
@@ -79,7 +85,6 @@ class TranscriptionManager: ObservableObject {
             window.level = .floating
             window.contentView = NSHostingView(rootView: contentView)
             window.center()
-            // Position slightly above the bottom of the screen
             if let screen = NSScreen.main {
                 let x = (screen.frame.width - window.frame.width) / 2
                 let y = screen.frame.height * 0.15
@@ -95,40 +100,40 @@ class TranscriptionManager: ObservableObject {
     }
     
     private func insertText(_ text: String) {
-        // 1. Copy to clipboard
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         
         print("Transcription: \(text)")
-        
-        // 2. Play success sound
         NSSound(named: "Glass")?.play()
         
-        // 3. Insert at cursor via Cmd+V simulation
-        // We add a tiny delay to ensure focus is returned to the original app 
-        // after the overlay window is hidden.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             let source = CGEventSource(stateID: .combinedSessionState)
-            
-            // Virtual key code for 'v' is 9
             let vDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
             vDown?.flags = .maskCommand
-            
             let vUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
             vUp?.flags = .maskCommand
             
             vDown?.post(tap: .cgAnnotatedSessionEventTap)
             vUp?.post(tap: .cgAnnotatedSessionEventTap)
+            
+            self.isTranscribing = false
+            self.hideOverlay()
         }
     }
     
     func setupHotkey() {
-        // We use a global monitor for a specific key combo
-        // For example: Cmd+Shift+L
-        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            // cmd: 0x100000, shift: 0x20000, l: 37
-            if event.modifierFlags.contains([.command, .shift]) && event.keyCode == 37 {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return }
+            
+            print("Global Key Event: \(event.keyCode), Modifiers: \(event.modifierFlags.rawValue)")
+            
+            let currentModifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue
+            if Int(currentModifiers) == self.shortcutModifiers && Int(event.keyCode) == self.shortcutKeyCode {
                 DispatchQueue.main.async {
                     self.toggleRecording()
                 }
