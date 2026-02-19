@@ -25,6 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.title = "OpenWhisper Settings"
             window.contentView = NSHostingView(rootView: contentView)
             window.center()
+            window.isReleasedWhenClosed = false
             settingsWindow = window
         }
         settingsWindow?.makeKeyAndOrderFront(nil)

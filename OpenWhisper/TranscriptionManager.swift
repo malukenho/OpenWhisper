@@ -12,6 +12,10 @@ class TranscriptionManager: ObservableObject {
     @AppStorage("shortcutKeyCode") var shortcutKeyCode: Int = 37 // Default 'L'
     @AppStorage("shortcutModifiers") var shortcutModifiers: Int = 1179648 // Default Cmd+Shift
     
+    // Persistent binary paths
+    @AppStorage("whisperPath") var whisperPath: String = "/opt/homebrew/bin/whisper"
+    @AppStorage("binPath") var binPath: String = "/opt/homebrew/bin"
+    
     var isAccessibilityTrusted: Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         return AXIsProcessTrustedWithOptions(options as CFDictionary)
@@ -62,7 +66,7 @@ class TranscriptionManager: ObservableObject {
         isTranscribing = true
         
         if let audioURL = recorder.stopRecording() {
-            whisper.transcribe(audioURL: audioURL) { text in
+            whisper.transcribe(audioURL: audioURL, whisperPath: whisperPath, binPath: binPath) { text in
                 DispatchQueue.main.async {
                     if let text = text, !text.isEmpty {
                         self.insertText(text)

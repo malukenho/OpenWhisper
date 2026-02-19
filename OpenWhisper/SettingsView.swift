@@ -37,7 +37,7 @@ struct SettingsView: View {
             }
             
             VStack(alignment: .leading, spacing: 10) {
-                Text("Current Shortcut:")
+                Text("Toggle Recording Shortcut:")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 
@@ -46,7 +46,7 @@ struct SettingsView: View {
                 }) {
                     Text(isRecordingShortcut ? "Recording... (Press any key)" : shortcutString)
                         .frame(maxWidth: .infinity)
-                        .padding()
+                        .padding(10)
                         .background(Color.secondary.opacity(0.2))
                         .cornerRadius(8)
                         .overlay(
@@ -56,17 +56,39 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding()
+            .padding(.horizontal)
             
-            Text("Press the button and then perform the key combination you want to use to toggle recording.")
-                .font(.caption)
-                .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 15) {
+                Text("Binary Paths")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+                
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Whisper CLI Path:")
+                        .font(.caption)
+                    TextField("e.g. /opt/homebrew/bin/whisper", text: $manager.whisperPath)
+                        .textFieldStyle(.roundedBorder)
+                }
+                
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Dependencies PATH (contains ffmpeg):")
+                        .font(.caption)
+                    TextField("e.g. /opt/homebrew/bin", text: $manager.binPath)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            .padding()
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(8)
+            
+            Text("Tip: You can find these by running 'which whisper' and 'which ffmpeg' in your terminal.")
+                .font(.caption2)
                 .foregroundColor(.secondary)
             
             Spacer()
         }
         .padding()
-        .frame(width: 350, height: 250)
+        .frame(width: 400, height: 450)
         .onAppear {
             // Monitor local events when recording
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in

@@ -1,17 +1,16 @@
 import Foundation
 
 class WhisperService {
-    func transcribe(audioURL: URL, completion: @escaping (String?) -> Void) {
+    func transcribe(audioURL: URL, whisperPath: String, binPath: String, completion: @escaping (String?) -> Void) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/whisper")
+        process.executableURL = URL(fileURLWithPath: whisperPath)
         
-        // Setup environment to include Homebrew bin path for ffmpeg
+        // Setup environment to include configurable bin path for ffmpeg
         var env = ProcessInfo.processInfo.environment
-        let homebrewPath = "/opt/homebrew/bin"
         if let currentPath = env["PATH"] {
-            env["PATH"] = "\(homebrewPath):\(currentPath)"
+            env["PATH"] = "\(binPath):\(currentPath)"
         } else {
-            env["PATH"] = homebrewPath
+            env["PATH"] = binPath
         }
         process.environment = env
         
@@ -29,6 +28,7 @@ class WhisperService {
             "--output_format", "txt",
             // "--language", "en", force a language
             "--model", "base"
+//            "--model", "medium"
         ]
         
         let pipe = Pipe()
