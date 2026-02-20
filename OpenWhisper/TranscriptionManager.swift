@@ -14,14 +14,15 @@ class TranscriptionManager: ObservableObject {
     @Published var isRecording = false
     @Published var isTranscribing = false
     @Published var history: [TranscriptionEntry] = []
+    @Published var currentMode: RecordingMode = .none
     
     // Persistent binary paths
     @AppStorage("whisperPath") var whisperPath: String = "/opt/homebrew/bin/whisper"
     @AppStorage("binPath") var binPath: String = "/opt/homebrew/bin"
     
-    private var currentMode: RecordingMode = .none
     private var isFnKeyCurrentlyPressed = false
     private var lastFnDownTime: Date = Date.distantPast
+    private var pttStopTimer: Timer?
     
     var isAccessibilityTrusted: Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
@@ -98,7 +99,7 @@ class TranscriptionManager: ObservableObject {
         if overlayWindow == nil {
             let contentView = RecordingOverlayView(manager: self)
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 200, height: 60),
+                contentRect: NSRect(x: 0, y: 0, width: 160, height: 48),
                 styleMask: [.borderless, .fullSizeContentView],
                 backing: .buffered, defer: false)
             window.isOpaque = false
@@ -108,7 +109,7 @@ class TranscriptionManager: ObservableObject {
             window.center()
             if let screen = NSScreen.main {
                 let x = (screen.frame.width - window.frame.width) / 2
-                let y = screen.frame.height * 0.15
+                let y = screen.frame.height * 0.10 // Moved from 0.15 to 0.10
                 window.setFrameOrigin(NSPoint(x: x, y: y))
             }
             overlayWindow = window
@@ -193,29 +194,31 @@ class TranscriptionManager: ObservableObject {
     
     private func handleFnDown() {
         let now = Date()
-        let doublePressThreshold: TimeInterval = 0.3
+        let doublePressThreshold: TimeInterval = 0.4 // Slightly more generous for better detection
         
         DispatchQueue.main.async {
+            // Cancel any pending PTT stop
+            self.pttStopTimer?.invalidate()
+            self.pttStopTimer = nil
+
             if self.isRecording && self.currentMode == .handsFree {
                 // Single press to stop hands-free
                 print("Stopping hands-free recording...")
                 self.stopAndTranscribe()
                 self.currentMode = .none
+            } else if now.timeIntervalSince(self.lastFnDownTime) < doublePressThreshold {
+                // Double press detected!
+                print("Double press detected! Switching to hands-free mode.")
+                self.currentMode = .handsFree
+                if !self.isRecording {
+                    self.start()
+                }
             } else {
-                if now.timeIntervalSince(self.lastFnDownTime) < doublePressThreshold {
-                    // Double press detected!
-                    print("Double press detected! Entering hands-free mode.")
-                    if !self.isRecording {
-                        self.start()
-                    }
-                    self.currentMode = .handsFree
-                } else {
-                    // Start PTT mode
-                    print("FN Down: Starting PTT recording...")
-                    if !self.isRecording {
-                        self.start()
-                    }
-                    self.currentMode = .pushToTalk
+                // Start PTT mode
+                print("FN Down: Starting PTT recording...")
+                self.currentMode = .pushToTalk
+                if !self.isRecording {
+                    self.start()
                 }
             }
             self.lastFnDownTime = now
@@ -225,9 +228,19 @@ class TranscriptionManager: ObservableObject {
     private func handleFnUp() {
         DispatchQueue.main.async {
             if self.currentMode == .pushToTalk {
-                print("FN Up: Stopping PTT recording...")
-                self.stopAndTranscribe()
-                self.currentMode = .none
+                // Instead of stopping immediately, wait a bit to see if it's a double-press
+                print("FN Up: Waiting to see if it's a double-press...")
+                self.pttStopTimer?.invalidate()
+                self.pttStopTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        if self.currentMode == .pushToTalk {
+                            print("PTT timer expired: Stopping recording...")
+                            self.stopAndTranscribe()
+                            self.currentMode = .none
+                        }
+                    }
+                }
             }
         }
     }

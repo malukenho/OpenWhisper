@@ -10,15 +10,23 @@ struct RecordingOverlayView: View {
         ZStack {
             if manager.isTranscribing {
                 TimelineView(.animation) { timeline in
-                    let phase = CGFloat(timeline.date.timeIntervalSinceReferenceDate.remainder(dividingBy: 1.5) / 1.5)
+                    // Use truncatingRemainder to ensure phase is always positive [0, 1]
+                    let duration: TimeInterval = 1.5
+                    let elapsed = timeline.date.timeIntervalSinceReferenceDate
+                    let phase = CGFloat(elapsed.truncatingRemainder(dividingBy: duration) / duration)
                     
                     Text("Transcribing...")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white.opacity(0.4))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.3))
                         .overlay(
                             GeometryReader { geo in
+                                let width = geo.size.width
+                                // Animate from completely left to completely right
+                                // Mask width is 70% of text width
+                                let maskWidth = width * 0.7
+                                
                                 Text("Transcribing...")
-                                    .font(.system(size: 16, weight: .medium))
+                                    .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(.white)
                                     .mask(
                                         LinearGradient(
@@ -26,53 +34,34 @@ struct RecordingOverlayView: View {
                                             startPoint: .leading,
                                             endPoint: .trailing
                                         )
-                                        .frame(width: geo.size.width * 0.5)
-                                        .offset(x: -geo.size.width + (phase * geo.size.width * 2))
+                                        .frame(width: maskWidth)
+                                        .offset(x: -maskWidth + (phase * (width + maskWidth)))
                                     )
                             }
                         )
                 }
                 .transition(.opacity)
             } else {
-                HStack(spacing: 30) {
-                    // Cancel Button
-                    Button(action: {
-                        manager.cancelRecording()
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.gray)
-                    }
-                    .buttonStyle(.plain)
-
+                HStack(spacing: 0) {
                     // Waveform
-                    HStack(spacing: 3) {
+                    HStack(spacing: 2) {
                         ForEach(0..<audioLevels.count, id: \.self) { index in
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: 1)
                                 .fill(Color.white)
-                                .frame(width: 3, height: max(4, audioLevels[index] * 40))
+                                .frame(width: 2, height: max(3, audioLevels[index] * 30))
                         }
                     }
-                    .frame(width: 100, height: 40)
-
-                    // Stop Button
-                    Button(action: {
-                        manager.toggleRecording()
-                    }) {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.red)
-                    }
-                    .buttonStyle(.plain)
+                    .frame(width: 80, height: 30)
                 }
                 .transition(.opacity)
             }
         }
-        .padding(.horizontal, 25)
-        .padding(.vertical, 12)
-        .frame(minWidth: 240, minHeight: 64)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
+        .frame(minWidth: 120, minHeight: 48)
         .background(Color.black.opacity(0.8))
         .clipShape(Capsule())
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: manager.currentMode)
         .animation(.easeInOut, value: manager.isTranscribing)
         .onReceive(timer) { _ in
             if manager.isRecording {
