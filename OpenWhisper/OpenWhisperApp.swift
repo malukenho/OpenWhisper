@@ -10,9 +10,27 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     let manager = TranscriptionManager()
     var settingsWindow: NSWindow?
+    var historyWindow: NSWindow?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         manager.setupHotkey()
+    }
+    
+    @objc func openHistory() {
+        if historyWindow == nil {
+            let contentView = HistoryView(manager: manager)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 450, height: 600),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered, defer: false)
+            window.title = "Transcription History"
+            window.contentView = NSHostingView(rootView: contentView)
+            window.center()
+            window.isReleasedWhenClosed = false
+            historyWindow = window
+        }
+        historyWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
     
     @objc func openSettings() {
@@ -55,6 +73,11 @@ struct OpenWhisperApp: App {
                 appDelegate.manager.toggleRecording()
             }
             .keyboardShortcut("r")
+            
+            Button("History...") {
+                appDelegate.openHistory()
+            }
+            .keyboardShortcut("h")
             
             Button("Settings...") {
                 appDelegate.openSettings()

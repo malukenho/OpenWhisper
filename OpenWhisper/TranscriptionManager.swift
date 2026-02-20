@@ -5,16 +5,23 @@ import Combine
 import AVFoundation
 
 class TranscriptionManager: ObservableObject {
+    enum RecordingMode {
+        case none
+        case pushToTalk
+        case handsFree
+    }
+    
     @Published var isRecording = false
     @Published var isTranscribing = false
-    
-    // Persistent shortcut settings
-    @AppStorage("shortcutKeyCode") var shortcutKeyCode: Int = 37 // Default 'L'
-    @AppStorage("shortcutModifiers") var shortcutModifiers: Int = 1179648 // Default Cmd+Shift
+    @Published var history: [TranscriptionEntry] = []
     
     // Persistent binary paths
     @AppStorage("whisperPath") var whisperPath: String = "/opt/homebrew/bin/whisper"
     @AppStorage("binPath") var binPath: String = "/opt/homebrew/bin"
+    
+    private var currentMode: RecordingMode = .none
+    private var isFnKeyCurrentlyPressed = false
+    private var lastFnDownTime: Date = Date.distantPast
     
     var isAccessibilityTrusted: Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
@@ -25,6 +32,10 @@ class TranscriptionManager: ObservableObject {
     private let whisper = WhisperService()
     private var overlayWindow: NSWindow?
     private var eventMonitor: Any?
+    
+    init() {
+        loadHistory()
+    }
     
     func toggleRecording() {
         if isRecording {
@@ -69,6 +80,7 @@ class TranscriptionManager: ObservableObject {
             whisper.transcribe(audioURL: audioURL, whisperPath: whisperPath, binPath: binPath) { text in
                 DispatchQueue.main.async {
                     if let text = text, !text.isEmpty {
+                        self.addToHistory(text)
                         self.insertText(text)
                     } else {
                         self.isTranscribing = false
@@ -108,6 +120,25 @@ class TranscriptionManager: ObservableObject {
         overlayWindow?.orderOut(nil)
     }
     
+    private func addToHistory(_ text: String) {
+        let entry = TranscriptionEntry(text: text, date: Date())
+        history.insert(entry, at: 0)
+        saveHistory()
+    }
+    
+    private func saveHistory() {
+        if let encoded = try? JSONEncoder().encode(history) {
+            UserDefaults.standard.set(encoded, forKey: "transcriptionHistory")
+        }
+    }
+    
+    private func loadHistory() {
+        if let data = UserDefaults.standard.data(forKey: "transcriptionHistory"),
+           let decoded = try? JSONDecoder().decode([TranscriptionEntry].self, from: data) {
+            history = decoded
+        }
+    }
+    
     private func insertText(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -132,7 +163,7 @@ class TranscriptionManager: ObservableObject {
     }
     
     func setupHotkey() {
-        print("Setting up hotkey: \(shortcutKeyCode) with modifiers \(shortcutModifiers)")
+        print("Setting up FN key monitor...")
         
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -143,18 +174,60 @@ class TranscriptionManager: ObservableObject {
         let isTrusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
         print("Accessibility permissions trusted: \(isTrusted)")
         
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             guard let self = self else { return }
             
-            let currentModifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue
+            let isFnDown = event.modifierFlags.contains(.function)
             
-            // Debug: print(String(format: "Key: %d, Mod: 0x%08X", event.keyCode, currentModifiers))
-            
-            if Int(currentModifiers) == self.shortcutModifiers && Int(event.keyCode) == self.shortcutKeyCode {
-                print("Hotkey triggered!")
-                DispatchQueue.main.async {
-                    self.toggleRecording()
+            if isFnDown && !self.isFnKeyCurrentlyPressed {
+                // Key Down
+                self.isFnKeyCurrentlyPressed = true
+                self.handleFnDown()
+            } else if !isFnDown && self.isFnKeyCurrentlyPressed {
+                // Key Up
+                self.isFnKeyCurrentlyPressed = false
+                self.handleFnUp()
+            }
+        }
+    }
+    
+    private func handleFnDown() {
+        let now = Date()
+        let doublePressThreshold: TimeInterval = 0.3
+        
+        DispatchQueue.main.async {
+            if self.isRecording && self.currentMode == .handsFree {
+                // Single press to stop hands-free
+                print("Stopping hands-free recording...")
+                self.stopAndTranscribe()
+                self.currentMode = .none
+            } else {
+                if now.timeIntervalSince(self.lastFnDownTime) < doublePressThreshold {
+                    // Double press detected!
+                    print("Double press detected! Entering hands-free mode.")
+                    if !self.isRecording {
+                        self.start()
+                    }
+                    self.currentMode = .handsFree
+                } else {
+                    // Start PTT mode
+                    print("FN Down: Starting PTT recording...")
+                    if !self.isRecording {
+                        self.start()
+                    }
+                    self.currentMode = .pushToTalk
                 }
+            }
+            self.lastFnDownTime = now
+        }
+    }
+    
+    private func handleFnUp() {
+        DispatchQueue.main.async {
+            if self.currentMode == .pushToTalk {
+                print("FN Up: Stopping PTT recording...")
+                self.stopAndTranscribe()
+                self.currentMode = .none
             }
         }
     }

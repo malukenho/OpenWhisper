@@ -3,15 +3,18 @@ import AVFoundation
 
 class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     private var audioRecorder: AVAudioRecorder?
-    private let audioFilename: URL
+    private var currentAudioFilename: URL?
     
     override init() {
-        let tempDir = FileManager.default.temporaryDirectory
-        self.audioFilename = tempDir.appendingPathComponent("recording.wav")
         super.init()
     }
     
     func startRecording() {
+        let tempDir = FileManager.default.temporaryDirectory
+        let filename = "recording_\(UUID().uuidString).wav"
+        let audioFilename = tempDir.appendingPathComponent(filename)
+        self.currentAudioFilename = audioFilename
+        
         print("Starting recording at: \(audioFilename.path)")
         let settings = [
             AVFormatIDKey: Int(kAudioFormatLinearPCM),
@@ -44,9 +47,10 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     }
     
     func stopRecording() -> URL? {
+        let url = currentAudioFilename
         audioRecorder?.stop()
         audioRecorder = nil
         print("Recording stopped.")
-        return audioFilename
+        return url
     }
 }
