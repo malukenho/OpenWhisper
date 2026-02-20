@@ -41,8 +41,14 @@ class WhisperService {
             print("Whisper process finished. Looking for: \(txtFile.path)")
             
             if let content = try? String(contentsOf: txtFile, encoding: .utf8) {
-                print("Transcription success: \(content.prefix(50))...")
-                completion(content.trimmingCharacters(in: .whitespacesAndNewlines))
+                // Remove newlines and collapse multiple spaces
+                let cleanedContent = content
+                    .replacingOccurrences(of: "\\n", with: " ", options: .regularExpression)
+                    .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                print("Transcription success: \(cleanedContent.prefix(50))...")
+                completion(cleanedContent)
             } else {
                 print("Failed to read transcription file at: \(txtFile.path)")
                 completion(nil)
