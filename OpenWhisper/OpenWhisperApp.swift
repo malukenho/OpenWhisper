@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let manager = TranscriptionManager()
     var settingsWindow: NSWindow?
     var historyWindow: NSWindow?
+    var postProcessingWindow: NSWindow?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         manager.setupHotkey()
@@ -49,6 +50,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    @objc func openPostProcessing() {
+        if postProcessingWindow == nil {
+            let contentView = PostProcessingSettingsView()
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 480, height: 520),
+                styleMask: [.titled, .closable, .miniaturizable],
+                backing: .buffered, defer: false)
+            window.title = "Post-Processing Rules"
+            window.contentView = NSHostingView(rootView: contentView)
+            window.center()
+            window.isReleasedWhenClosed = false
+            postProcessingWindow = window
+        }
+        postProcessingWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 }
 
 @main
@@ -83,6 +101,11 @@ struct OpenWhisperApp: App {
                 appDelegate.openSettings()
             }
             .keyboardShortcut(",")
+
+            Button("Post-Processing...") {
+                appDelegate.openPostProcessing()
+            }
+            .keyboardShortcut("p")
             
             Divider()
             

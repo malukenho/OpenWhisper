@@ -98,6 +98,13 @@ struct SettingsView: View {
                 .font(.caption2)
                 .foregroundColor(.secondary)
             
+            Button("Open Post-Processing Rules…") {
+                if let delegate = NSApp.delegate as? AppDelegate {
+                    delegate.openPostProcessing()
+                }
+            }
+            .buttonStyle(.link)
+            
             Spacer()
         }
         .padding()

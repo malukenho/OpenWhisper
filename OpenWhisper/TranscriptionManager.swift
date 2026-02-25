@@ -23,6 +23,10 @@ class TranscriptionManager: ObservableObject {
     private var isFnKeyCurrentlyPressed = false
     private var lastFnDownTime: Date = Date.distantPast
     private var pttStopTimer: Timer?
+    private var capturedApp: NSRunningApplication?
+
+    private let gemini = GeminiService()
+    private let rulesStore = PostProcessingStore.shared
     
     var isAccessibilityTrusted: Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
@@ -58,6 +62,8 @@ class TranscriptionManager: ObservableObject {
     }
     
     private func start() {
+        // Capture the frontmost app before we take focus
+        capturedApp = NSWorkspace.shared.frontmostApplication
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             DispatchQueue.main.async {
                 if granted {
@@ -82,7 +88,7 @@ class TranscriptionManager: ObservableObject {
                 DispatchQueue.main.async {
                     if let text = text, !text.isEmpty {
                         self.addToHistory(text)
-                        self.insertText(text)
+                        self.applyPostProcessing(to: text)
                     } else {
                         self.isTranscribing = false
                         self.hideOverlay()
@@ -93,6 +99,83 @@ class TranscriptionManager: ObservableObject {
             isTranscribing = false
             hideOverlay()
         }
+    }
+
+    private func applyPostProcessing(to text: String) {
+        let bundleID = capturedApp?.bundleIdentifier
+        let rule = rulesStore.rule(for: bundleID)
+
+        switch rule?.action {
+        case .shortcut(let name):
+            runShortcut(name: name, input: text)
+        case .gemini(let prompt):
+            let apiKey = rulesStore.geminiAPIKey
+            guard !apiKey.isEmpty else {
+                print("Gemini API key not configured, inserting raw text.")
+                insertText(text)
+                return
+            }
+            Task {
+                do {
+                    let result = try await self.gemini.process(text: text, prompt: prompt, apiKey: apiKey)
+                    await MainActor.run { self.insertText(result) }
+                } catch {
+                    print("Gemini error: \(error.localizedDescription)")
+                    await MainActor.run { self.insertText(text) }
+                }
+            }
+        default:
+            insertText(text)
+        }
+    }
+
+    private func runShortcut(name: String, input: String) {
+        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent("whisper_input.txt")
+        do {
+            try input.write(to: tmpURL, atomically: true, encoding: .utf8)
+        } catch {
+            print("Failed to write shortcut input: \(error)")
+            insertText(input)
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+        process.arguments = ["run", name, "--input-path", tmpURL.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.terminationHandler = { [weak self] _ in
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let plain = Self.plainText(from: data).trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                self?.insertText(plain.isEmpty ? input : plain)
+            }
+            try? FileManager.default.removeItem(at: tmpURL)
+        }
+        do {
+            try process.run()
+        } catch {
+            print("Failed to run shortcut: \(error)")
+            insertText(input)
+        }
+    }
+
+    /// Converts raw Data that may be RTF, RTFD, or plain UTF-8 text into a plain String.
+    private static func plainText(from data: Data) -> String {
+        // Try RTF first
+        if let attributed = try? NSAttributedString(data: data,
+                                                    options: [.documentType: NSAttributedString.DocumentType.rtf],
+                                                    documentAttributes: nil) {
+            return attributed.string
+        }
+        // Try RTFD
+        if let attributed = try? NSAttributedString(data: data,
+                                                    options: [.documentType: NSAttributedString.DocumentType.rtfd],
+                                                    documentAttributes: nil) {
+            return attributed.string
+        }
+        // Fall back to plain UTF-8
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     private func showOverlay() {
