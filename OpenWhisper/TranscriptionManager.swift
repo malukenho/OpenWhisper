@@ -13,12 +13,14 @@ class TranscriptionManager: ObservableObject {
     
     @Published var isRecording = false
     @Published var isTranscribing = false
+    @Published var processingMessage: String = "Transcribing"
     @Published var history: [TranscriptionEntry] = []
     @Published var currentMode: RecordingMode = .none
     
     // Persistent binary paths
     @AppStorage("whisperPath") var whisperPath: String = "/opt/homebrew/bin/whisper"
     @AppStorage("binPath") var binPath: String = "/opt/homebrew/bin"
+    @AppStorage("copyToClipboardEnabled") var copyToClipboardEnabled: Bool = true
     
     private var isFnKeyCurrentlyPressed = false
     private var lastFnDownTime: Date = Date.distantPast
@@ -82,12 +84,12 @@ class TranscriptionManager: ObservableObject {
         NSSound(named: "Pop")?.play()
         isRecording = false
         isTranscribing = true
+        processingMessage = "Transcribing"
         
         if let audioURL = recorder.stopRecording() {
             whisper.transcribe(audioURL: audioURL, whisperPath: whisperPath, binPath: binPath) { text in
                 DispatchQueue.main.async {
                     if let text = text, !text.isEmpty {
-                        self.addToHistory(text)
                         self.applyPostProcessing(to: text)
                     } else {
                         self.isTranscribing = false
@@ -107,25 +109,27 @@ class TranscriptionManager: ObservableObject {
 
         switch rule?.action {
         case .shortcut(let name):
+            processingMessage = "Running Shortcut"
             runShortcut(name: name, input: text)
         case .gemini(let prompt):
             let apiKey = rulesStore.geminiAPIKey
             guard !apiKey.isEmpty else {
                 print("Gemini API key not configured, inserting raw text.")
-                insertText(text)
+                insertText(text, originalText: text, source: nil)
                 return
             }
+            processingMessage = "Processing with Gemini"
             Task {
                 do {
                     let result = try await self.gemini.process(text: text, prompt: prompt, apiKey: apiKey)
-                    await MainActor.run { self.insertText(result) }
+                    await MainActor.run { self.insertText(result, originalText: text, source: "Gemini AI") }
                 } catch {
-                    print("Gemini error: \(error.localizedDescription)")
-                    await MainActor.run { self.insertText(text) }
+                    print("[Gemini] Error: \(error.localizedDescription)")
+                    await MainActor.run { self.insertText(text, originalText: text, source: nil) }
                 }
             }
         default:
-            insertText(text)
+            insertText(text, originalText: text, source: nil)
         }
     }
 
@@ -135,7 +139,7 @@ class TranscriptionManager: ObservableObject {
             try input.write(to: tmpURL, atomically: true, encoding: .utf8)
         } catch {
             print("Failed to write shortcut input: \(error)")
-            insertText(input)
+            insertText(input, originalText: input, source: nil)
             return
         }
 
@@ -148,7 +152,11 @@ class TranscriptionManager: ObservableObject {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let plain = Self.plainText(from: data).trimmingCharacters(in: .whitespacesAndNewlines)
             DispatchQueue.main.async {
-                self?.insertText(plain.isEmpty ? input : plain)
+                if plain.isEmpty {
+                    self?.insertText(input, originalText: input, source: nil)
+                } else {
+                    self?.insertText(plain, originalText: input, source: "Shortcut: \(name)")
+                }
             }
             try? FileManager.default.removeItem(at: tmpURL)
         }
@@ -156,7 +164,7 @@ class TranscriptionManager: ObservableObject {
             try process.run()
         } catch {
             print("Failed to run shortcut: \(error)")
-            insertText(input)
+            insertText(input, originalText: input, source: nil)
         }
     }
 
@@ -189,13 +197,15 @@ class TranscriptionManager: ObservableObject {
             window.backgroundColor = .clear
             window.level = .floating
             window.contentView = NSHostingView(rootView: contentView)
-            window.center()
-            if let screen = NSScreen.main {
-                let x = (screen.frame.width - window.frame.width) / 2
-                let y = screen.frame.height * 0.10 // Moved from 0.15 to 0.10
-                window.setFrameOrigin(NSPoint(x: x, y: y))
-            }
             overlayWindow = window
+        }
+        // Always reposition to the screen containing the mouse cursor
+        let mouseLocation = NSEvent.mouseLocation
+        let activeScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
+        if let screen = activeScreen {
+            let x = screen.frame.minX + (screen.frame.width - (overlayWindow?.frame.width ?? 160)) / 2
+            let y = screen.frame.minY + screen.frame.height * 0.10
+            overlayWindow?.setFrameOrigin(NSPoint(x: x, y: y))
         }
         overlayWindow?.orderFrontRegardless()
     }
@@ -204,8 +214,8 @@ class TranscriptionManager: ObservableObject {
         overlayWindow?.orderOut(nil)
     }
     
-    private func addToHistory(_ text: String) {
-        let entry = TranscriptionEntry(text: text, date: Date())
+    private func addToHistory(_ text: String, processedText: String? = nil, processingSource: String? = nil) {
+        let entry = TranscriptionEntry(text: text, processedText: processedText, processingSource: processingSource, date: Date())
         history.insert(entry, at: 0)
         saveHistory()
     }
@@ -223,26 +233,54 @@ class TranscriptionManager: ObservableObject {
         }
     }
     
-    private func insertText(_ text: String) {
+    private func insertText(_ text: String, originalText: String, source: String?) {
+        let isDifferent = text != originalText
+        addToHistory(originalText, processedText: isDifferent ? text : nil, processingSource: source)
+
+        print("Transcription: \(text)")
+        NSSound(named: "Glass")?.play()
+
+        // Save the current clipboard contents so we can restore them if the user
+        // has opted out of keeping the result on the clipboard.
+        let savedItems: [NSPasteboardItem]? = copyToClipboardEnabled ? nil : {
+            NSPasteboard.general.pasteboardItems?.map { item in
+                let copy = NSPasteboardItem()
+                for type in item.types {
+                    if let data = item.data(forType: type) {
+                        copy.setData(data, forType: type)
+                    }
+                }
+                return copy
+            }
+        }()
+
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        
-        print("Transcription: \(text)")
-        NSSound(named: "Glass")?.play()
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             let source = CGEventSource(stateID: .combinedSessionState)
             let vDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
             vDown?.flags = .maskCommand
             let vUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
             vUp?.flags = .maskCommand
-            
+
             vDown?.post(tap: .cgAnnotatedSessionEventTap)
             vUp?.post(tap: .cgAnnotatedSessionEventTap)
-            
+
             self.isTranscribing = false
             self.hideOverlay()
+
+            // Restore clipboard after paste if the user opted out of clipboard copy
+            if let saved = savedItems {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    if !saved.isEmpty {
+                        pb.writeObjects(saved)
+                    }
+                }
+            }
         }
     }
     

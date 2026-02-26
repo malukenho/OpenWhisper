@@ -28,15 +28,29 @@ struct GeminiService {
             throw GeminiError.apiError(raw)
         }
 
+        let rawResponse = String(data: data, encoding: .utf8) ?? ""
+        print("[Gemini] Raw response: \(rawResponse)")
+
         guard
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            throw GeminiError.unexpectedResponse("Could not parse JSON")
+        }
+
+        // Surface API-level errors returned with a 200 status
+        if let error = json["error"] as? [String: Any],
+           let message = error["message"] as? String {
+            throw GeminiError.apiError(message)
+        }
+
+        guard
             let candidates = json["candidates"] as? [[String: Any]],
             let first = candidates.first,
             let content = first["content"] as? [String: Any],
             let parts = content["parts"] as? [[String: Any]],
             let resultText = parts.first?["text"] as? String
         else {
-            throw GeminiError.unexpectedResponse
+            throw GeminiError.unexpectedResponse("Unexpected shape: \(rawResponse)")
         }
 
         return resultText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -46,13 +60,13 @@ struct GeminiService {
 enum GeminiError: LocalizedError {
     case invalidURL
     case apiError(String)
-    case unexpectedResponse
+    case unexpectedResponse(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid Gemini API URL"
         case .apiError(let msg): return "Gemini API error: \(msg)"
-        case .unexpectedResponse: return "Unexpected Gemini API response format"
+        case .unexpectedResponse(let detail): return "Unexpected Gemini response: \(detail)"
         }
     }
 }

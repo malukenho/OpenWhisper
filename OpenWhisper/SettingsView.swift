@@ -104,10 +104,30 @@ struct SettingsView: View {
                 }
             }
             .buttonStyle(.link)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Behaviour")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+
+                Toggle(isOn: $manager.copyToClipboardEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Copy result to clipboard & auto-paste")
+                            .fontWeight(.medium)
+                        Text("When disabled, clipboard is not overwritten.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(8)
             
             Spacer()
         }
         .padding()
-        .frame(width: 400, height: 500)
+        .frame(width: 400, height: 600)
     }
 }

@@ -39,9 +39,14 @@ struct HistoryView: View {
                             HStack {
                                 Text(entry.date, style: .date)
                                 Text(entry.date, style: .time)
+                                if let source = entry.processingSource {
+                                    Text("·")
+                                    Text(source)
+                                        .foregroundColor(.accentColor)
+                                }
                                 Spacer()
                                 Button(action: {
-                                    copyToClipboard(entry.text)
+                                    copyToClipboard(entry.processedText ?? entry.text)
                                 }) {
                                     Image(systemName: "doc.on.doc")
                                 }
@@ -49,16 +54,45 @@ struct HistoryView: View {
                             }
                             .font(.caption)
                             .foregroundColor(.secondary)
-                            
-                            Text(entry.text)
-                                .font(.body)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
+
+                            if let processed = entry.processedText {
+                                Text(processed)
+                                    .font(.body)
+                                    .lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Divider()
+                                HStack(spacing: 4) {
+                                    Text("Original:")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(entry.text)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer()
+                                    Button(action: { copyToClipboard(entry.text) }) {
+                                        Image(systemName: "doc.on.doc")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundColor(.secondary)
+                                }
+                            } else {
+                                Text(entry.text)
+                                    .font(.body)
+                                    .lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                         .padding(.vertical, 4)
                         .contextMenu {
                             Button("Copy") {
-                                copyToClipboard(entry.text)
+                                copyToClipboard(entry.processedText ?? entry.text)
+                            }
+                            if entry.processedText != nil {
+                                Button("Copy Original") {
+                                    copyToClipboard(entry.text)
+                                }
                             }
                             Button("Delete") {
                                 deleteEntry(entry)

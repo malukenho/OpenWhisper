@@ -14,18 +14,17 @@ struct RecordingOverlayView: View {
                     let duration: TimeInterval = 1.5
                     let elapsed = timeline.date.timeIntervalSinceReferenceDate
                     let phase = CGFloat(elapsed.truncatingRemainder(dividingBy: duration) / duration)
+                    let message = manager.processingMessage
                     
-                    Text("Transcribing...")
+                    Text(message)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.white.opacity(0.3))
                         .overlay(
                             GeometryReader { geo in
                                 let width = geo.size.width
-                                // Animate from completely left to completely right
-                                // Mask width is 70% of text width
                                 let maskWidth = width * 0.7
                                 
-                                Text("Transcribing...")
+                                Text(message)
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(.white)
                                     .mask(

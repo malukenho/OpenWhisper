@@ -223,9 +223,9 @@ struct RuleEditorView: View {
                                 .tag(app.bundleIdentifier ?? "")
                             }
                         }
-                        .onChange(of: appBundleID) { id in
-                            if let app = runningApps.first(where: { $0.bundleIdentifier == id }) {
-                                appName = app.localizedName ?? id
+                        .onChange(of: appBundleID) { oldValue, newValue in
+                            if let app = runningApps.first(where: { $0.bundleIdentifier == newValue }) {
+                                appName = app.localizedName ?? newValue
                             }
                         }
 
@@ -339,3 +339,4 @@ struct RuleEditorView: View {
         dismiss()
     }
 }
+
