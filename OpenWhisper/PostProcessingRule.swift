@@ -59,6 +59,7 @@ struct PostProcessingRule: Codable, Identifiable {
     var appBundleID: String
     var appName: String
     var action: ActionType
+    var isEnabled: Bool = true
 
     static let defaultBundleID = "*"
 }
@@ -100,12 +101,13 @@ class PostProcessingStore: ObservableObject {
 
     // MARK: - Lookup
 
-    /// Returns the best matching rule for a given bundle ID.
+    /// Returns the best matching enabled rule for a given bundle ID.
     func rule(for bundleID: String?) -> PostProcessingRule? {
+        let enabled = rules.filter { $0.isEnabled }
         guard let bundleID = bundleID else {
-            return rules.first { $0.appBundleID == PostProcessingRule.defaultBundleID }
+            return enabled.first { $0.appBundleID == PostProcessingRule.defaultBundleID }
         }
-        return rules.first { $0.appBundleID == bundleID }
-            ?? rules.first { $0.appBundleID == PostProcessingRule.defaultBundleID }
+        return enabled.first { $0.appBundleID == bundleID }
+            ?? enabled.first { $0.appBundleID == PostProcessingRule.defaultBundleID }
     }
 }

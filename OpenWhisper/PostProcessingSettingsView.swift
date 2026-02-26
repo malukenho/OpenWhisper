@@ -55,7 +55,11 @@ struct PostProcessingSettingsView: View {
             } else {
                 List {
                     ForEach(store.rules) { rule in
-                        RuleRowView(rule: rule)
+                        RuleRowView(rule: rule, onToggleEnabled: {
+                            if let idx = store.rules.firstIndex(where: { $0.id == rule.id }) {
+                                store.rules[idx].isEnabled.toggle()
+                            }
+                        })
                             .contentShape(Rectangle())
                             .onTapGesture { editingRule = rule }
                     }
@@ -92,11 +96,13 @@ struct PostProcessingSettingsView: View {
             }
         }
         .sheet(item: $editingRule) { rule in
-            RuleEditorView(existingRule: rule) { updated in
+            RuleEditorView(existingRule: rule, onSave: { updated in
                 if let idx = store.rules.firstIndex(where: { $0.id == updated.id }) {
                     store.rules[idx] = updated
                 }
-            }
+            }, onDelete: {
+                store.rules.removeAll { $0.id == rule.id }
+            })
         }
     }
 }
@@ -105,6 +111,7 @@ struct PostProcessingSettingsView: View {
 
 struct RuleRowView: View {
     let rule: PostProcessingRule
+    var onToggleEnabled: () -> Void = {}
 
     var appIcon: NSImage? {
         guard rule.appBundleID != PostProcessingRule.defaultBundleID,
@@ -129,12 +136,17 @@ struct RuleRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(rule.appName)
                     .fontWeight(.medium)
+                    .foregroundColor(rule.isEnabled ? .primary : .secondary)
                 Text(rule.action.displayName)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
             Spacer()
+
+            Toggle("", isOn: Binding(get: { rule.isEnabled }, set: { _ in onToggleEnabled() }))
+                .labelsHidden()
+                .onTapGesture { onToggleEnabled() }
 
             Image(systemName: "chevron.right")
                 .foregroundColor(.secondary)
@@ -151,6 +163,7 @@ struct RuleEditorView: View {
 
     let existingRule: PostProcessingRule?
     let onSave: (PostProcessingRule) -> Void
+    var onDelete: (() -> Void)? = nil
 
     @State private var appBundleID: String
     @State private var appName: String
@@ -159,9 +172,10 @@ struct RuleEditorView: View {
     @State private var geminiPrompt: String
     @State private var runningApps: [NSRunningApplication] = []
 
-    init(existingRule: PostProcessingRule?, onSave: @escaping (PostProcessingRule) -> Void) {
+    init(existingRule: PostProcessingRule?, onSave: @escaping (PostProcessingRule) -> Void, onDelete: (() -> Void)? = nil) {
         self.existingRule = existingRule
         self.onSave = onSave
+        self.onDelete = onDelete
 
         let rule = existingRule
         _appBundleID = State(initialValue: rule?.appBundleID ?? "")
@@ -274,6 +288,15 @@ struct RuleEditorView: View {
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                if let onDelete = onDelete {
+                    Spacer()
+                    Button(role: .destructive) {
+                        onDelete()
+                        dismiss()
+                    } label: {
+                        Label("Delete Rule", systemImage: "trash")
+                    }
+                }
                 Spacer()
                 Button("Save") { save() }
                     .keyboardShortcut(.defaultAction)
