@@ -19,8 +19,13 @@ class TranscriptionManager: ObservableObject {
     
     // Persistent binary paths
     @AppStorage("whisperPath") var whisperPath: String = "/opt/homebrew/bin/whisper"
-    @AppStorage("binPath") var binPath: String = "/opt/homebrew/bin"
+    @AppStorage("ffmpegPath") var ffmpegPath: String = "/opt/homebrew/bin/ffmpeg"
     @AppStorage("copyToClipboardEnabled") var copyToClipboardEnabled: Bool = true
+
+    // Whisper configuration
+    @AppStorage("whisperModel") var whisperModel: String = "base"
+    @AppStorage("whisperLanguage") var whisperLanguage: String = ""
+    @AppStorage("whisperInitialPrompt") var whisperInitialPrompt: String = ""
     
     private var isFnKeyCurrentlyPressed = false
     private var lastFnDownTime: Date = Date.distantPast
@@ -87,7 +92,14 @@ class TranscriptionManager: ObservableObject {
         processingMessage = "Transcribing"
         
         if let audioURL = recorder.stopRecording() {
-            whisper.transcribe(audioURL: audioURL, whisperPath: whisperPath, binPath: binPath) { text in
+            whisper.transcribe(
+                audioURL: audioURL,
+                whisperPath: whisperPath,
+                ffmpegPath: ffmpegPath,
+                model: whisperModel,
+                language: whisperLanguage,
+                initialPrompt: whisperInitialPrompt
+            ) { text in
                 DispatchQueue.main.async {
                     if let text = text, !text.isEmpty {
                         self.applyPostProcessing(to: text)

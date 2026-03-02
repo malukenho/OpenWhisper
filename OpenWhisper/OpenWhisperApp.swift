@@ -116,11 +116,13 @@ struct OpenWhisperApp: App {
         } label: {
             if appDelegate.manager.isRecording {
                 Image(systemName: "mic.fill")
-                    .foregroundColor(.red)
+                    .symbolRenderingMode(.hierarchical)
             } else if appDelegate.manager.isTranscribing {
-                Image(systemName: "waveform.circle.fill")
+                Image(systemName: "ellipsis.bubble.fill")
+                    .symbolRenderingMode(.hierarchical)
             } else {
-                Image(systemName: "waveform.circle")
+                Image(systemName: "bubble.left.fill")
+                    .symbolRenderingMode(.monochrome)
             }
         }
     }

@@ -1,16 +1,25 @@
 import Foundation
 
 class WhisperService {
-    func transcribe(audioURL: URL, whisperPath: String, binPath: String, completion: @escaping (String?) -> Void) {
+    func transcribe(
+        audioURL: URL,
+        whisperPath: String,
+        ffmpegPath: String,
+        model: String = "base",
+        language: String = "",
+        initialPrompt: String = "",
+        completion: @escaping (String?) -> Void
+    ) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: whisperPath)
         
-        // Setup environment to include configurable bin path for ffmpeg
+        // Add ffmpeg's directory to PATH so whisper can find it
+        let ffmpegDir = URL(fileURLWithPath: ffmpegPath).deletingLastPathComponent().path
         var env = ProcessInfo.processInfo.environment
         if let currentPath = env["PATH"] {
-            env["PATH"] = "\(binPath):\(currentPath)"
+            env["PATH"] = "\(ffmpegDir):\(currentPath)"
         } else {
-            env["PATH"] = binPath
+            env["PATH"] = ffmpegDir
         }
         process.environment = env
         
@@ -21,15 +30,19 @@ class WhisperService {
         // Ensure output dir exists
         try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         
-        // whisper [audio] --output_dir [dir] --output_format txt --model base
-        process.arguments = [
+        var args: [String] = [
             audioURL.path,
             "--output_dir", outputDir.path,
             "--output_format", "txt",
-            // "--language", "en", force a language
-            "--model", "base"
-//            "--model", "medium"
+            "--model", model.isEmpty ? "base" : model
         ]
+        if !language.isEmpty {
+            args += ["--language", language]
+        }
+        if !initialPrompt.isEmpty {
+            args += ["--initial_prompt", initialPrompt]
+        }
+        process.arguments = args
         
         let pipe = Pipe()
         process.standardError = pipe // Whisper often logs to stderr

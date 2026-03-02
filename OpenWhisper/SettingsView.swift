@@ -84,9 +84,9 @@ struct SettingsView: View {
                 }
                 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Dependencies PATH (contains ffmpeg):")
+                    Text("FFmpeg Path:")
                         .font(.caption)
-                    TextField("e.g. /opt/homebrew/bin", text: $manager.binPath)
+                    TextField("e.g. /opt/homebrew/bin/ffmpeg", text: $manager.ffmpegPath)
                         .textFieldStyle(.roundedBorder)
                 }
             }
@@ -97,6 +97,82 @@ struct SettingsView: View {
             Text("Tip: You can find these by running 'which whisper' and 'which ffmpeg' in your terminal.")
                 .font(.caption2)
                 .foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 15) {
+                Text("Whisper Configuration")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Model:")
+                        .font(.caption)
+                    Picker("Model", selection: $manager.whisperModel) {
+                        Text("tiny").tag("tiny")
+                        Text("tiny.en (English only)").tag("tiny.en")
+                        Text("base (default)").tag("base")
+                        Text("base.en (English only)").tag("base.en")
+                        Text("small").tag("small")
+                        Text("small.en (English only)").tag("small.en")
+                        Text("medium").tag("medium")
+                        Text("medium.en (English only)").tag("medium.en")
+                        Text("large").tag("large")
+                        Text("large-v2").tag("large-v2")
+                        Text("large-v3").tag("large-v3")
+                        Text("turbo").tag("turbo")
+                    }
+                    .pickerStyle(.menu)
+                    Text("Larger models are more accurate but slower. English-only models are faster for English.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Language:")
+                        .font(.caption)
+                    Picker("Language", selection: $manager.whisperLanguage) {
+                        Text("Auto-detect").tag("")
+                        Divider()
+                        Text("English (en)").tag("en")
+                        Text("Spanish (es)").tag("es")
+                        Text("French (fr)").tag("fr")
+                        Text("German (de)").tag("de")
+                        Text("Italian (it)").tag("it")
+                        Text("Portuguese (pt)").tag("pt")
+                        Text("Dutch (nl)").tag("nl")
+                        Text("Russian (ru)").tag("ru")
+                        Text("Chinese (zh)").tag("zh")
+                        Text("Japanese (ja)").tag("ja")
+                        Text("Korean (ko)").tag("ko")
+                        Text("Arabic (ar)").tag("ar")
+                        Text("Hindi (hi)").tag("hi")
+                        Text("Polish (pl)").tag("pl")
+                        Text("Ukrainian (uk)").tag("uk")
+                        Text("Swedish (sv)").tag("sv")
+                        Text("Norwegian (no)").tag("no")
+                        Text("Danish (da)").tag("da")
+                        Text("Finnish (fi)").tag("fi")
+                        Text("Turkish (tr)").tag("tr")
+                    }
+                    .pickerStyle(.menu)
+                    Text("Setting a language skips auto-detection and can improve accuracy and speed.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Initial Prompt (optional):")
+                        .font(.caption)
+                    TextField("e.g. The following is a software engineering conversation.", text: $manager.whisperInitialPrompt)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Provides context to Whisper to improve accuracy for domain-specific terms.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(8)
             
             Button("Open Post-Processing Rules…") {
                 if let delegate = NSApp.delegate as? AppDelegate {
@@ -128,6 +204,6 @@ struct SettingsView: View {
             Spacer()
         }
         .padding()
-        .frame(width: 400, height: 600)
+        .frame(width: 400, height: 900)
     }
 }
