@@ -25,6 +25,7 @@ struct SettingsView: View {
 
 struct GeneralSettingsTab: View {
     @ObservedObject var manager: TranscriptionManager
+    @AppStorage("overlayStyle") private var overlayStyle: String = "bubble"
 
     var body: some View {
         ScrollView {
@@ -87,6 +88,27 @@ struct GeneralSettingsTab: View {
                                 }
                             }
                         }
+                    }
+                }
+
+                // Overlay style
+                GlassCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Overlay Style", systemImage: "rectangle.on.rectangle")
+                            .font(.headline)
+
+                        Picker("Overlay Style", selection: $overlayStyle) {
+                            Label("Bubble", systemImage: "bubble.left.fill").tag("bubble")
+                            Label("Dynamic Island  (beta)", systemImage: "pill.fill").tag("dynamicIsland")
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+
+                        Text(overlayStyle == "dynamicIsland"
+                             ? "Positions the overlay at the top of the screen inside the notch area, like a Dynamic Island."
+                             : "Classic floating pill anchored near the bottom of the screen.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                     }
                 }
 

@@ -35,6 +35,9 @@ class TranscriptionManager: ObservableObject {
     @AppStorage("whisperLanguage") var whisperLanguage: String = ""
     @AppStorage("whisperInitialPrompt") var whisperInitialPrompt: String = ""
 
+    // Overlay style: "bubble" (default) or "dynamicIsland"
+    @AppStorage("overlayStyle") var overlayStyle: String = "bubble"
+
     private var isFnKeyCurrentlyPressed = false
     private var lastFnDownTime: Date = Date.distantPast
     private var pttStopTimer: Timer?
@@ -51,6 +54,7 @@ class TranscriptionManager: ObservableObject {
 
     private let whisper = WhisperService()
     private var overlayWindow: NSWindow?
+    private var overlayWindowStyle: String = "" // style the current window was built for
     private var eventMonitor: Any?
 
     init() {
@@ -337,25 +341,35 @@ class TranscriptionManager: ObservableObject {
             return
         }
 
+        // Recreate the window if the style has changed since it was first built
+        if overlayWindowStyle != overlayStyle {
+            overlayWindow?.orderOut(nil)
+            overlayWindow = nil
+        }
+
+        let count = CGFloat(jobs.count)
+
+        if overlayStyle == "dynamicIsland" {
+            updateDynamicIslandOverlay(count: count)
+        } else {
+            updateBubbleOverlay(count: count)
+        }
+
+        overlayWindowStyle = overlayStyle
+        overlayWindow?.orderFrontRegardless()
+    }
+
+    private func updateBubbleOverlay(count: CGFloat) {
         let rowH: CGFloat = 40
         let divH: CGFloat = 1
         let padH: CGFloat = 16
-        let count = CGFloat(jobs.count)
         let height = count * rowH + max(0, count - 1) * divH + padH
         let width: CGFloat = 185
 
         if overlayWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-                styleMask: [.borderless, .fullSizeContentView],
-                backing: .buffered, defer: false)
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.level = .floating
-            window.contentView = NSHostingView(rootView: RecordingOverlayView(manager: self))
+            let window = makeOverlayWindow(width: width, height: height, level: .floating)
             overlayWindow = window
 
-            // Position once on first show — anchor bottom-center on the active screen
             let mouseLocation = NSEvent.mouseLocation
             let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
             if let screen = screen {
@@ -364,15 +378,55 @@ class TranscriptionManager: ObservableObject {
                 overlayWindow?.setFrameOrigin(NSPoint(x: x, y: y))
             }
         } else {
-            // Keep the same bottom-left origin, just grow the height
             if let origin = overlayWindow?.frame.origin {
                 overlayWindow?.setFrame(
                     NSRect(x: origin.x, y: origin.y, width: width, height: height),
                     display: true, animate: true)
             }
         }
+    }
 
-        overlayWindow?.orderFrontRegardless()
+    private func updateDynamicIslandOverlay(count: CGFloat) {
+        // Compact rows that sit in the notch/menu-bar area at the top of the screen
+        let rowH: CGFloat = 36
+        let divH: CGFloat = 1
+        let padH: CGFloat = 12
+        let height = count * rowH + max(0, count - 1) * divH + padH
+        let width: CGFloat = 240
+
+        // Always use the screen that contains the mouse cursor
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
+
+        guard let screen = screen else { return }
+
+        // Flush with the very top of the display (inside the notch/menu-bar area)
+        let x = screen.frame.minX + (screen.frame.width - width) / 2
+        let y = screen.frame.maxY - height
+
+        if overlayWindow == nil {
+            // statusBar level (25) sits above the menu bar so the pill renders in the notch
+            let level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+            let window = makeOverlayWindow(width: width, height: height, level: level)
+            overlayWindow = window
+            overlayWindow?.setFrameOrigin(NSPoint(x: x, y: y))
+        } else {
+            overlayWindow?.setFrame(
+                NSRect(x: x, y: y, width: width, height: height),
+                display: true, animate: true)
+        }
+    }
+
+    private func makeOverlayWindow(width: CGFloat, height: CGFloat, level: NSWindow.Level) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.level = level
+        window.contentView = NSHostingView(rootView: RecordingOverlayView(manager: self))
+        return window
     }
 
     // MARK: - Helpers

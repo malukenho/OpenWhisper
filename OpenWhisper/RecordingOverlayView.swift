@@ -6,20 +6,26 @@ import Combine
 struct RecordingOverlayView: View {
     @ObservedObject var manager: TranscriptionManager
 
+    private var isDynamicIsland: Bool { manager.overlayStyle == "dynamicIsland" }
+
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(manager.jobs.enumerated()), id: \.element.id) { index, job in
-                JobRowView(job: job)
+                JobRowView(job: job, compact: isDynamicIsland)
                 if index < manager.jobs.count - 1 {
                     Divider()
                         .background(Color.white.opacity(0.12))
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.82))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.horizontal, isDynamicIsland ? 10 : 12)
+        .padding(.vertical, isDynamicIsland ? 6 : 8)
+        .background(Color.black.opacity(isDynamicIsland ? 0.92 : 0.82))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: isDynamicIsland ? 20 : 22,
+                style: .continuous)
+        )
     }
 }
 
@@ -27,17 +33,23 @@ struct RecordingOverlayView: View {
 
 struct JobRowView: View {
     @ObservedObject var job: TranscriptionJob
+    var compact: Bool = false
+
     @State private var audioLevels: [CGFloat] = Array(repeating: 0.1, count: 14)
     let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
+    private var iconSize: CGFloat { compact ? 18 : 22 }
+    private var rowHeight: CGFloat { compact ? 36 : 40 }
+    private var barCount: Int { compact ? 10 : 14 }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: compact ? 6 : 8) {
             // Target app icon
             if let icon = job.appIcon {
                 Image(nsImage: icon)
                     .resizable()
-                    .frame(width: 22, height: 22)
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .frame(width: iconSize, height: iconSize)
+                    .clipShape(RoundedRectangle(cornerRadius: compact ? 4 : 5, style: .continuous))
             }
 
             // State indicator
@@ -45,10 +57,10 @@ struct JobRowView: View {
                 switch job.state {
                 case .recording:
                     HStack(spacing: 2) {
-                        ForEach(0..<audioLevels.count, id: \.self) { i in
+                        ForEach(0..<(compact ? 10 : 14), id: \.self) { i in
                             RoundedRectangle(cornerRadius: 1)
                                 .fill(Color.white)
-                                .frame(width: 2, height: max(3, audioLevels[i] * 26))
+                                .frame(width: 2, height: max(3, audioLevels[min(i, audioLevels.count - 1)] * 26))
                         }
                     }
                     .frame(height: 26)
@@ -63,19 +75,19 @@ struct JobRowView: View {
                             }
                         }
                         Text("Queued")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: compact ? 10 : 11, weight: .medium))
                             .foregroundColor(.white.opacity(0.45))
                     }
 
                 case .transcribing:
-                    ShimmerText(message: "Transcribing")
+                    ShimmerText(message: "Transcribing", fontSize: compact ? 11 : 12)
 
                 case .postProcessing(let msg):
-                    ShimmerText(message: msg)
+                    ShimmerText(message: msg, fontSize: compact ? 11 : 12)
                 }
             }
         }
-        .frame(height: 40)
+        .frame(height: rowHeight)
         .onReceive(timer) { _ in
             guard case .recording = job.state else { return }
             let level = job.recorder.updateMeters()
@@ -92,6 +104,7 @@ struct JobRowView: View {
 
 struct ShimmerText: View {
     let message: String
+    var fontSize: CGFloat = 12
 
     var body: some View {
         TimelineView(.animation) { timeline in
@@ -100,14 +113,14 @@ struct ShimmerText: View {
             let phase = CGFloat(elapsed.truncatingRemainder(dividingBy: duration) / duration)
 
             Text(message)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: fontSize, weight: .medium))
                 .foregroundColor(.white.opacity(0.3))
                 .overlay(
                     GeometryReader { geo in
                         let width = geo.size.width
                         let maskWidth = width * 0.7
                         Text(message)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: fontSize, weight: .medium))
                             .foregroundColor(.white)
                             .mask(
                                 LinearGradient(
