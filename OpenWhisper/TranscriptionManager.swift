@@ -82,6 +82,13 @@ class TranscriptionManager: ObservableObject {
         let targetApp = NSWorkspace.shared.frontmostApplication
         let job = TranscriptionJob(targetApp: targetApp)
 
+        // Capture the focused AX element's window and PID *before* we take focus.
+        // This lets us target the exact browser window / terminal tab and paste
+        // in the background without bringing the app to the front.
+        let (axWindow, pid) = Self.captureAXTarget()
+        job.targetWindow = axWindow
+        job.targetPID = pid > 0 ? pid : (targetApp?.processIdentifier ?? 0)
+
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             DispatchQueue.main.async {
                 guard granted else {
@@ -95,6 +102,33 @@ class TranscriptionManager: ObservableObject {
                 self.updateOverlay()
             }
         }
+    }
+
+    /// Walks the Accessibility tree to find the focused window and its owning PID.
+    /// Returns `(nil, 0)` gracefully if accessibility permissions are missing.
+    private static func captureAXTarget() -> (window: AXUIElement?, pid: pid_t) {
+        let sysWide = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+                sysWide, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focused = focusedRef else { return (nil, 0) }
+
+        let focusedElement = focused as! AXUIElement
+
+        // PID of the focused element's process
+        var pid: pid_t = 0
+        AXUIElementGetPid(focusedElement, &pid)
+
+        // Walk up to the enclosing window
+        var windowRef: CFTypeRef?
+        var window: AXUIElement?
+        if AXUIElementCopyAttributeValue(
+                focusedElement, kAXWindowAttribute as CFString, &windowRef) == .success,
+           let w = windowRef {
+            window = (w as! AXUIElement)
+        }
+
+        return (window, pid)
     }
 
     private func stopAndTranscribe() {
@@ -257,17 +291,29 @@ class TranscriptionManager: ObservableObject {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        // Re-focus the original app so paste lands in the right window
-        job.targetApp?.activate(options: [])
+        // Raise the exact window (e.g. the right browser window or iTerm2 pane)
+        // within the app's z-order — without activating the whole application.
+        if let window = job.targetWindow {
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             let source = CGEventSource(stateID: .combinedSessionState)
             let vDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
             vDown?.flags = .maskCommand
             let vUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
             vUp?.flags = .maskCommand
-            vDown?.post(tap: .cgAnnotatedSessionEventTap)
-            vUp?.post(tap: .cgAnnotatedSessionEventTap)
+
+            // Send Cmd+V directly to the target PID — the app stays in the background.
+            // Fall back to the session tap only if we have no PID.
+            let pid = job.targetPID
+            if pid > 0, let down = vDown, let up = vUp {
+                down.postToPid(pid)
+                up.postToPid(pid)
+            } else {
+                vDown?.post(tap: .cgAnnotatedSessionEventTap)
+                vUp?.post(tap: .cgAnnotatedSessionEventTap)
+            }
 
             self.isTranscriptionRunning = false
             self.removeJob(job)

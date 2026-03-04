@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Precise window targeting via Accessibility API** — At recording start, OpenWhisper now captures the `AXUIElement` of the focused window (not just the app). When pasting, it raises that specific window within the app's z-order — meaning the correct browser window or iTerm2 pane is always targeted, even if you have multiple open.
+- **Background paste** — Transcription results are now injected directly into the target process using `CGEvent.postToPid(_:)` instead of activating the application first. The app you are currently working in stays frontmost; the text silently lands in the original target.
 - **Settings revamp with tabs** — Settings is now split across three tabs: **General** (interaction model, accessibility, behaviour), **Whisper** (binary paths, model, language, initial prompt), and **Post-Processing** (inline, no separate window needed). Section cards use the macOS 26 liquid glass material with a graceful fallback for earlier versions.
 - **Transcription queue** — Multiple recordings can be queued while a previous one is still being processed by Whisper. Each recording is captured immediately with its own audio stream; transcription runs serially (one Whisper process at a time) so the CPU is not overwhelmed. Results are pasted into the correct target app in the order they were recorded.
 - **Multi-job overlay** — The floating recording bubble now stacks one row per active job. Each row shows the target app's icon and a live state indicator: animated waveform bars while recording, dimmed static bars with a "Queued" label while waiting, and the existing shimmer animation while transcribing or running post-processing.

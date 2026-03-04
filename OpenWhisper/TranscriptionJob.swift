@@ -28,6 +28,11 @@ class TranscriptionJob: ObservableObject, Identifiable {
     var audioURL: URL?
     let recorder = AudioRecorder()
     let startedAt = Date()
+    /// The specific window (AXUIElement) that was focused at recording start.
+    /// Used to raise the exact browser window / terminal tab without activating the app.
+    var targetWindow: AXUIElement?
+    /// PID of the focused process at recording start, for background paste via CGEventPostToPid.
+    var targetPID: pid_t = 0
 
     init(targetApp: NSRunningApplication?) {
         self.targetApp = targetApp
