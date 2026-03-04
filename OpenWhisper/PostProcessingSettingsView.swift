@@ -89,7 +89,6 @@ struct PostProcessingSettingsView: View {
             }
             .padding()
         }
-        .frame(width: 480, height: 520)
         .sheet(isPresented: $showingAddRule) {
             RuleEditorView(existingRule: nil) { newRule in
                 store.rules.append(newRule)

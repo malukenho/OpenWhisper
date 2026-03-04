@@ -38,10 +38,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             let contentView = SettingsView(manager: manager)
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 350, height: 250),
+                contentRect: NSRect(x: 0, y: 0, width: 500, height: 580),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered, defer: false)
             window.title = "OpenWhisper Settings"
+            window.titlebarAppearsTransparent = true
             window.contentView = NSHostingView(rootView: contentView)
             window.center()
             window.isReleasedWhenClosed = false
