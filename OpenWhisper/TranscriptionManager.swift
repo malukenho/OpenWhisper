@@ -154,6 +154,14 @@ class TranscriptionManager: ObservableObject {
 
     // MARK: - Queue
 
+    /// Returns (creating if needed) the persistent directory for saved audio recordings.
+    private func audioStorageDirectory() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("OpenWhisper/Recordings")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     /// Starts transcribing the next queued job if no transcription is already running.
     private func processNextQueued() {
         guard !isTranscriptionRunning,
@@ -164,6 +172,11 @@ class TranscriptionManager: ObservableObject {
             processNextQueued()
             return
         }
+
+        // Copy the recording to persistent storage BEFORE whisper deletes the temp file.
+        let dest = audioStorageDirectory().appendingPathComponent("\(job.id.uuidString).wav")
+        try? FileManager.default.copyItem(at: audioURL, to: dest)
+        job.savedAudioURL = dest
 
         isTranscriptionRunning = true
         setJobState(job, .transcribing)
@@ -276,7 +289,7 @@ class TranscriptionManager: ObservableObject {
 
     private func insertText(_ text: String, originalText: String, source: String?, job: TranscriptionJob) {
         let isDifferent = text != originalText
-        addToHistory(originalText, processedText: isDifferent ? text : nil, processingSource: source)
+        addToHistory(originalText, processedText: isDifferent ? text : nil, processingSource: source, audioURL: job.savedAudioURL)
 
         print("Transcription: \(text)")
         NSSound(named: "Glass")?.play()
@@ -451,8 +464,8 @@ class TranscriptionManager: ObservableObject {
         updateOverlay()
     }
 
-    private func addToHistory(_ text: String, processedText: String? = nil, processingSource: String? = nil) {
-        let entry = TranscriptionEntry(text: text, processedText: processedText, processingSource: processingSource, date: Date())
+    private func addToHistory(_ text: String, processedText: String? = nil, processingSource: String? = nil, audioURL: URL? = nil) {
+        let entry = TranscriptionEntry(text: text, processedText: processedText, processingSource: processingSource, date: Date(), audioURL: audioURL)
         history.insert(entry, at: 0)
         saveHistory()
     }
@@ -468,6 +481,18 @@ class TranscriptionManager: ObservableObject {
            let decoded = try? JSONDecoder().decode([TranscriptionEntry].self, from: data) {
             history = decoded
         }
+    }
+
+    /// Deletes the persistent audio file for a single entry (if any).
+    func deleteEntryAudio(_ entry: TranscriptionEntry) {
+        if let url = entry.audioURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Deletes all persisted audio files for the current history.
+    func clearAllAudio() {
+        for entry in history { deleteEntryAudio(entry) }
     }
 
     // MARK: - Hotkey

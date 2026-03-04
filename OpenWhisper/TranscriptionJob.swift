@@ -25,7 +25,8 @@ class TranscriptionJob: ObservableObject, Identifiable {
     let targetApp: NSRunningApplication?
     let appIcon: NSImage?
     @Published var state: JobState = .recording
-    var audioURL: URL?
+    var audioURL: URL?       // temp WAV path (whisper deletes this after use)
+    var savedAudioURL: URL?  // persistent copy saved before whisper runs
     let recorder = AudioRecorder()
     let startedAt = Date()
     /// The specific window (AXUIElement) that was focused at recording start.
