@@ -1,31 +1,55 @@
 import SwiftUI
 import Combine
 
-// MARK: - Overlay root
+// MARK: - Bubble overlay (default style)
 
 struct RecordingOverlayView: View {
     @ObservedObject var manager: TranscriptionManager
 
-    private var isDynamicIsland: Bool { manager.overlayStyle == "dynamicIsland" }
-
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(manager.jobs.enumerated()), id: \.element.id) { index, job in
-                JobRowView(job: job, compact: isDynamicIsland)
+                JobRowView(job: job, compact: false)
                 if index < manager.jobs.count - 1 {
                     Divider()
                         .background(Color.white.opacity(0.12))
                 }
             }
         }
-        .padding(.horizontal, isDynamicIsland ? 10 : 12)
-        .padding(.vertical, isDynamicIsland ? 6 : 8)
-        .background(Color.black.opacity(isDynamicIsland ? 0.92 : 0.82))
-        .clipShape(
-            RoundedRectangle(
-                cornerRadius: isDynamicIsland ? 20 : 22,
-                style: .continuous)
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.82))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+// MARK: - Dynamic Island overlay
+
+struct DynamicIslandOverlayView: View {
+    @ObservedObject var manager: TranscriptionManager
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(manager.jobs.enumerated()), id: \.element.id) { index, job in
+                JobRowView(job: job, compact: true)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.85, anchor: .top)),
+                            removal: .opacity.combined(with: .scale(scale: 0.85, anchor: .top))
+                        )
+                    )
+                if index < manager.jobs.count - 1 {
+                    Divider()
+                        .background(Color.white.opacity(0.15))
+                        .transition(.opacity)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.black)               // solid black to blend with notch
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .animation(.spring(response: 0.38, dampingFraction: 0.72), value: manager.jobs.count)
     }
 }
 
@@ -36,7 +60,8 @@ struct JobRowView: View {
     var compact: Bool = false
 
     @State private var audioLevels: [CGFloat] = Array(repeating: 0.1, count: 14)
-    let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+    // Use .default run-loop mode so the timer never fires during CoreAudio callbacks
+    @State private var timerSubscription: AnyCancellable? = nil
 
     private var iconSize: CGFloat { compact ? 18 : 22 }
     private var rowHeight: CGFloat { compact ? 36 : 40 }
@@ -57,7 +82,7 @@ struct JobRowView: View {
                 switch job.state {
                 case .recording:
                     HStack(spacing: 2) {
-                        ForEach(0..<(compact ? 10 : 14), id: \.self) { i in
+                        ForEach(0..<barCount, id: \.self) { i in
                             RoundedRectangle(cornerRadius: 1)
                                 .fill(Color.white)
                                 .frame(width: 2, height: max(3, audioLevels[min(i, audioLevels.count - 1)] * 26))
@@ -88,14 +113,23 @@ struct JobRowView: View {
             }
         }
         .frame(height: rowHeight)
-        .onReceive(timer) { _ in
-            guard case .recording = job.state else { return }
-            let level = job.recorder.updateMeters()
-            let normalized = CGFloat(max(0.1, (level + 60) / 60))
-            withAnimation(.spring(response: 0.1, dampingFraction: 0.5)) {
-                audioLevels.removeFirst()
-                audioLevels.append(normalized)
+        .onAppear {
+            // Start timer only when the row appears; use .default mode (not .common)
+            // so it never fires during CoreAudio run-loop processing.
+            let pub = Timer.publish(every: 0.1, on: .main, in: .default).autoconnect()
+            timerSubscription = pub.sink { _ in
+                guard case .recording = job.state else { return }
+                let level = job.recorder.updateMeters()
+                let normalized = CGFloat(max(0.1, (level + 60) / 60))
+                withAnimation(.spring(response: 0.1, dampingFraction: 0.5)) {
+                    audioLevels.removeFirst()
+                    audioLevels.append(normalized)
+                }
             }
+        }
+        .onDisappear {
+            timerSubscription?.cancel()
+            timerSubscription = nil
         }
     }
 }

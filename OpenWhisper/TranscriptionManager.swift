@@ -390,34 +390,36 @@ class TranscriptionManager: ObservableObject {
         // Compact rows that sit in the notch/menu-bar area at the top of the screen
         let rowH: CGFloat = 36
         let divH: CGFloat = 1
-        let padH: CGFloat = 12
-        let height = count * rowH + max(0, count - 1) * divH + padH
-        let width: CGFloat = 240
+        let padV: CGFloat = 16    // top+bottom padding inside the pill
+        let height = count * rowH + max(0, count - 1) * divH + padV
+        let width: CGFloat = 280
 
-        // Always use the screen that contains the mouse cursor
-        let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
+        // Primary screen (the one with the menu bar / notch) is always screens[0]
+        let screen = NSScreen.screens.first ?? NSScreen.main!
 
-        guard let screen = screen else { return }
-
-        // Flush with the very top of the display (inside the notch/menu-bar area)
+        // Pin the TOP of the window to the very top of the screen so the pill
+        // looks like it grows out of the notch downward.
         let x = screen.frame.minX + (screen.frame.width - width) / 2
-        let y = screen.frame.maxY - height
+        let newFrame = NSRect(x: x, y: screen.frame.maxY - height, width: width, height: height)
 
         if overlayWindow == nil {
-            // statusBar level (25) sits above the menu bar so the pill renders in the notch
+            // statusBar level (25) sits above the menu bar — pill renders in the notch
             let level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
-            let window = makeOverlayWindow(width: width, height: height, level: level)
+            let window = makeOverlayWindow(width: width, height: height, level: level, style: "dynamicIsland")
             overlayWindow = window
-            overlayWindow?.setFrameOrigin(NSPoint(x: x, y: y))
+            overlayWindow?.setFrame(newFrame, display: false)
         } else {
-            overlayWindow?.setFrame(
-                NSRect(x: x, y: y, width: width, height: height),
-                display: true, animate: true)
+            // Spring-feel expansion: use NSAnimationContext for smooth notch-grow effect
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.38
+                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.46, 0.45, 0.94)
+                ctx.allowsImplicitAnimation = true
+                overlayWindow?.animator().setFrame(newFrame, display: true)
+            }
         }
     }
 
-    private func makeOverlayWindow(width: CGFloat, height: CGFloat, level: NSWindow.Level) -> NSWindow {
+    private func makeOverlayWindow(width: CGFloat, height: CGFloat, level: NSWindow.Level, style: String = "bubble") -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.borderless, .fullSizeContentView],
@@ -425,7 +427,12 @@ class TranscriptionManager: ObservableObject {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.level = level
-        window.contentView = NSHostingView(rootView: RecordingOverlayView(manager: self))
+        window.hasShadow = (style == "dynamicIsland")
+        if style == "dynamicIsland" {
+            window.contentView = NSHostingView(rootView: DynamicIslandOverlayView(manager: self))
+        } else {
+            window.contentView = NSHostingView(rootView: RecordingOverlayView(manager: self))
+        }
         return window
     }
 
