@@ -364,6 +364,8 @@ class TranscriptionManager: ObservableObject {
 
         if overlayStyle == "dynamicIsland" {
             updateDynamicIslandOverlay(count: count)
+        } else if overlayStyle == "dynamicIslandMini" {
+            updateDynamicIslandMiniOverlay()
         } else {
             updateBubbleOverlay(count: count)
         }
@@ -403,32 +405,96 @@ class TranscriptionManager: ObservableObject {
         // Each row: 46pt icon + 13*2 vertical padding = 72pt. Dividers = 0.5pt.
         let rowH: CGFloat = 72
         let divH: CGFloat = 1
-        let height = count * rowH + max(0, count - 1) * divH
+        let notchClearance: CGFloat = 30  // matches DynamicIslandOverlayView
+        let height = count * rowH + max(0, count - 1) * divH + notchClearance
         let width: CGFloat = 320
 
         // Primary screen (the one with the menu bar / notch) is always screens[0]
         let screen = NSScreen.screens.first ?? NSScreen.main!
+        // Center of the screen — the notch is always here
+        let screenCenterX = screen.frame.minX + screen.frame.width / 2
 
-        // Pin the TOP of the window flush with the very top of the screen so the
-        // flat-top shape visually merges with the hardware notch.
-        let x = screen.frame.minX + (screen.frame.width - width) / 2
-        let newFrame = NSRect(x: x, y: screen.frame.maxY - height, width: width, height: height)
+        // Final frame: pinned to the very top, expands from center outward
+        let targetFrame = NSRect(
+            x: screenCenterX - width / 2,
+            y: screen.frame.maxY - height,
+            width: width,
+            height: height
+        )
 
         if overlayWindow == nil {
-            // statusBar level (25) sits above the menu bar — pill renders in the notch
             let level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
             let window = makeOverlayWindow(width: width, height: height, level: level, style: "dynamicIsland")
             overlayWindow = window
-            overlayWindow?.setFrame(newFrame, display: false)
+
+            // Start as a narrow pill the same width as the hardware notch, then
+            // expand outward to both sides — the "notch growing" visual.
+            let notchW: CGFloat = 130
+            let startFrame = NSRect(
+                x: screenCenterX - notchW / 2,
+                y: screen.frame.maxY - notchClearance,
+                width: notchW,
+                height: notchClearance
+            )
+            overlayWindow?.setFrame(startFrame, display: false)
+            overlayWindow?.orderFrontRegardless()
+
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.45
+                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.46, 0.45, 0.94)
+                ctx.allowsImplicitAnimation = true
+                overlayWindow?.animator().setFrame(targetFrame, display: true)
+            }
         } else {
-            // Spring-feel expansion: use NSAnimationContext for smooth notch-grow effect
+            // Subsequent jobs: expand height downward, keep centered width
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.38
                 ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.46, 0.45, 0.94)
                 ctx.allowsImplicitAnimation = true
-                overlayWindow?.animator().setFrame(newFrame, display: true)
+                overlayWindow?.animator().setFrame(targetFrame, display: true)
             }
         }
+    }
+
+    private func updateDynamicIslandMiniOverlay() {
+        // Mini style: fixed height (notch height only), expands left+right — never grows downward
+        let height: CGFloat = 30
+        let width: CGFloat = 320
+
+        let screen = NSScreen.screens.first ?? NSScreen.main!
+        let screenCenterX = screen.frame.minX + screen.frame.width / 2
+
+        let targetFrame = NSRect(
+            x: screenCenterX - width / 2,
+            y: screen.frame.maxY - height,
+            width: width,
+            height: height
+        )
+
+        if overlayWindow == nil {
+            let level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+            let window = makeOverlayWindow(width: width, height: height, level: level, style: "dynamicIslandMini")
+            overlayWindow = window
+
+            // Animate from notch-width outward (left+right expansion)
+            let notchW: CGFloat = 130
+            let startFrame = NSRect(
+                x: screenCenterX - notchW / 2,
+                y: screen.frame.maxY - height,
+                width: notchW,
+                height: height
+            )
+            overlayWindow?.setFrame(startFrame, display: false)
+            overlayWindow?.orderFrontRegardless()
+
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.35
+                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.46, 0.45, 0.94)
+                ctx.allowsImplicitAnimation = true
+                overlayWindow?.animator().setFrame(targetFrame, display: true)
+            }
+        }
+        // Mini style never resizes on queue changes — the badge conveys the count
     }
 
     private func makeOverlayWindow(width: CGFloat, height: CGFloat, level: NSWindow.Level, style: String = "bubble") -> NSWindow {
@@ -439,9 +505,11 @@ class TranscriptionManager: ObservableObject {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.level = level
-        window.hasShadow = (style == "dynamicIsland")
+        window.hasShadow = (style == "dynamicIsland" || style == "dynamicIslandMini")
         if style == "dynamicIsland" {
             window.contentView = NSHostingView(rootView: DynamicIslandOverlayView(manager: self))
+        } else if style == "dynamicIslandMini" {
+            window.contentView = NSHostingView(rootView: DynamicIslandMiniOverlayView(manager: self))
         } else {
             window.contentView = NSHostingView(rootView: RecordingOverlayView(manager: self))
         }

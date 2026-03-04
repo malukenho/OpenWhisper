@@ -53,8 +53,15 @@ private struct NotchExpandShape: Shape {
 struct DynamicIslandOverlayView: View {
     @ObservedObject var manager: TranscriptionManager
 
+    // The notch hardware sits in the top ~30pt — keep that area clear of content.
+    private let notchClearance: CGFloat = 30
+
     var body: some View {
         VStack(spacing: 0) {
+            // Black spacer that fills the notch cutout area; content starts below
+            Color.clear
+                .frame(height: notchClearance)
+
             ForEach(Array(manager.jobs.enumerated()), id: \.element.id) { index, job in
                 DynamicIslandJobRow(job: job)
                     .transition(.asymmetric(
@@ -260,6 +267,112 @@ struct JobRowView: View {
             timerSubscription?.cancel()
             timerSubscription = nil
         }
+    }
+}
+
+// MARK: - Dynamic Island Mini overlay
+
+/// Compact style: expands only left and right of the notch.
+/// Left = app icon, Right = waveform / transcribing icon / queue badge.
+struct DynamicIslandMiniOverlayView: View {
+    @ObservedObject var manager: TranscriptionManager
+
+    // Approximate width of the hardware notch (camera cutout)
+    private let notchWidth: CGFloat = 130
+    private let iconSize: CGFloat = 18
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // ── Left side: app icon ──────────────────────────────────────────
+            Group {
+                if let icon = manager.jobs.first?.appIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: iconSize, height: iconSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.white.opacity(0.15))
+                        .frame(width: iconSize, height: iconSize)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            // ── Centre: the hardware notch sits here — leave it clear ────────
+            Spacer().frame(width: notchWidth)
+
+            // ── Right side: status indicator ─────────────────────────────────
+            miniIndicator
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxHeight: .infinity)
+        .background(Color.black)
+        .clipShape(NotchExpandShape(radius: 16))
+    }
+
+    @ViewBuilder
+    private var miniIndicator: some View {
+        let totalJobs = manager.jobs.count
+        let recordingJob = manager.jobs.first(where: { $0.state == .recording })
+
+        if let job = recordingJob {
+            // Live waveform while recording
+            MiniWaveformView(recorder: job.recorder)
+        } else if manager.isTranscribing {
+            ZStack(alignment: .topTrailing) {
+                // Transcribing icon
+                Image(systemName: "waveform.and.mic")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white.opacity(0.85))
+                    .padding(.trailing, totalJobs > 1 ? 6 : 0)
+
+                // Red queue-count badge when more than one job is in flight
+                if totalJobs > 1 {
+                    ZStack {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 15, height: 15)
+                        Text("\(totalJobs)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    .offset(x: 7, y: -6)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Mini waveform (5 animated bars, compact)
+
+private struct MiniWaveformView: View {
+    let recorder: AudioRecorder
+
+    @State private var levels: [CGFloat] = [0.3, 0.5, 0.7, 0.5, 0.3]
+    @State private var timerSub: AnyCancellable?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(0..<5, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.white)
+                    .frame(width: 2.5, height: max(4, levels[i] * 18))
+            }
+        }
+        .frame(height: 18)
+        .onAppear {
+            let pub = Timer.publish(every: 0.1, on: .main, in: .default).autoconnect()
+            timerSub = pub.sink { _ in
+                let level = recorder.updateMeters()
+                let v = CGFloat(max(0.15, (level + 60) / 60))
+                withAnimation(.spring(response: 0.12, dampingFraction: 0.5)) {
+                    levels = Array(levels.dropFirst()) + [v]
+                }
+            }
+        }
+        .onDisappear { timerSub?.cancel(); timerSub = nil }
     }
 }
 
