@@ -24,6 +24,8 @@ Tired of switching windows to dictate text? OpenWhisper lives quietly in your me
 - 🌍 **Multilingual** — Detect language automatically or pin it to one of 20+ supported languages.
 - 🧠 **AI post-processing** — Optionally run transcriptions through Gemini AI or a macOS Shortcut before pasting (format code, fix grammar, translate — your rules).
 - 🎙️ **Two recording modes** — Push-to-Talk (hold `FN`) or Hands-Free (double-tap `FN`).
+- 🔀 **Switch apps freely while transcribing** — The target app is locked in at the moment you start recording. Walk away, switch windows, do something else — OpenWhisper will re-focus the right app and paste when it's done.
+- 🪟 **Target app indicator** — The recording overlay shows the icon of the app that will receive the transcription, so you always know where the text is going.
 
 ---
 
@@ -94,7 +96,7 @@ pip3 install openai-whisper
 1. **Double-tap** `FN` — recording starts
 2. **Single-tap** `FN` — recording stops and transcription begins
 
-> 💡 A floating waveform overlay appears while recording so you always know it's listening.
+> 💡 A floating waveform overlay appears while recording so you always know it's listening. The overlay shows the **icon of the target app** — you can freely switch to other apps while Whisper is transcribing and the result will still be pasted into the correct window.
 
 ---
 

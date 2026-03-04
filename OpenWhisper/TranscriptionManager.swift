@@ -16,6 +16,7 @@ class TranscriptionManager: ObservableObject {
     @Published var processingMessage: String = "Transcribing"
     @Published var history: [TranscriptionEntry] = []
     @Published var currentMode: RecordingMode = .none
+    @Published var capturedAppIcon: NSImage? = nil
     
     // Persistent binary paths
     @AppStorage("whisperPath") var whisperPath: String = "/opt/homebrew/bin/whisper"
@@ -71,6 +72,7 @@ class TranscriptionManager: ObservableObject {
     private func start() {
         // Capture the frontmost app before we take focus
         capturedApp = NSWorkspace.shared.frontmostApplication
+        capturedAppIcon = capturedApp?.icon
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             DispatchQueue.main.async {
                 if granted {
@@ -269,6 +271,10 @@ class TranscriptionManager: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+
+        // Activate the original app before pasting so the user can switch away
+        // during transcription and the text still lands in the right place.
+        self.capturedApp?.activate(options: [])
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             let source = CGEventSource(stateID: .combinedSessionState)

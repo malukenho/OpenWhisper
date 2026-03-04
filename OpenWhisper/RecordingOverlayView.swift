@@ -7,7 +7,16 @@ struct RecordingOverlayView: View {
     let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        ZStack {
+        HStack(spacing: 8) {
+            // Target app icon
+            if let icon = manager.capturedAppIcon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 22, height: 22)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+
+            ZStack {
             if manager.isTranscribing {
                 TimelineView(.animation) { timeline in
                     // Use truncatingRemainder to ensure phase is always positive [0, 1]
@@ -54,7 +63,8 @@ struct RecordingOverlayView: View {
                 }
                 .transition(.opacity)
             }
-        }
+            } // ZStack
+        } // HStack
         .padding(.horizontal, 15)
         .padding(.vertical, 8)
         .frame(minWidth: 120, minHeight: 48)
