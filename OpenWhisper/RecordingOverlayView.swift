@@ -74,7 +74,6 @@ struct JobRowView: View {
                     ShimmerText(message: msg)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: 40)
         .onReceive(timer) { _ in

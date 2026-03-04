@@ -296,7 +296,7 @@ class TranscriptionManager: ObservableObject {
         let padH: CGFloat = 16
         let count = CGFloat(jobs.count)
         let height = count * rowH + max(0, count - 1) * divH + padH
-        let width: CGFloat = 230
+        let width: CGFloat = 185
 
         if overlayWindow == nil {
             let window = NSWindow(
