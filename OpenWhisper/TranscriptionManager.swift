@@ -99,6 +99,15 @@ class TranscriptionManager: ObservableObject {
 
     private func stopAndTranscribe() {
         guard let job = jobs.first(where: { $0.state == .recording }) else { return }
+
+        // Discard recordings shorter than 1 second — too brief to be intentional
+        guard Date().timeIntervalSince(job.startedAt) >= 1.0 else {
+            _ = job.recorder.stopRecording()
+            removeJob(job)
+            NSSound(named: "Basso")?.play()
+            return
+        }
+
         NSSound(named: "Pop")?.play()
         job.audioURL = job.recorder.stopRecording()
         setJobState(job, .queued)

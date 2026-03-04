@@ -27,6 +27,7 @@ class TranscriptionJob: ObservableObject, Identifiable {
     @Published var state: JobState = .recording
     var audioURL: URL?
     let recorder = AudioRecorder()
+    let startedAt = Date()
 
     init(targetApp: NSRunningApplication?) {
         self.targetApp = targetApp
