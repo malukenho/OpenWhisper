@@ -10,14 +10,21 @@ class TranscriptionManager: ObservableObject {
         case pushToTalk
         case handsFree
     }
-    
-    @Published var isRecording = false
-    @Published var isTranscribing = false
-    @Published var processingMessage: String = "Transcribing"
+
+    // All active jobs: recording, queued, transcribing, post-processing
+    @Published var jobs: [TranscriptionJob] = []
     @Published var history: [TranscriptionEntry] = []
     @Published var currentMode: RecordingMode = .none
-    @Published var capturedAppIcon: NSImage? = nil
-    
+
+    // Computed state used by the menu bar and hotkey logic
+    var isRecording: Bool { jobs.contains { $0.state == .recording } }
+    var isTranscribing: Bool {
+        jobs.contains { job in
+            if case .postProcessing = job.state { return true }
+            return job.state == .transcribing
+        }
+    }
+
     // Persistent binary paths
     @AppStorage("whisperPath") var whisperPath: String = "/opt/homebrew/bin/whisper"
     @AppStorage("ffmpegPath") var ffmpegPath: String = "/opt/homebrew/bin/ffmpeg"
@@ -27,29 +34,29 @@ class TranscriptionManager: ObservableObject {
     @AppStorage("whisperModel") var whisperModel: String = "base"
     @AppStorage("whisperLanguage") var whisperLanguage: String = ""
     @AppStorage("whisperInitialPrompt") var whisperInitialPrompt: String = ""
-    
+
     private var isFnKeyCurrentlyPressed = false
     private var lastFnDownTime: Date = Date.distantPast
     private var pttStopTimer: Timer?
-    private var capturedApp: NSRunningApplication?
+    // Ensures only one whisper process runs at a time
+    private var isTranscriptionRunning = false
 
     private let gemini = GeminiService()
     private let rulesStore = PostProcessingStore.shared
-    
+
     var isAccessibilityTrusted: Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         return AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
-    
-    private let recorder = AudioRecorder()
+
     private let whisper = WhisperService()
     private var overlayWindow: NSWindow?
     private var eventMonitor: Any?
-    
+
     init() {
         loadHistory()
     }
-    
+
     func toggleRecording() {
         if isRecording {
             stopAndTranscribe()
@@ -57,103 +64,124 @@ class TranscriptionManager: ObservableObject {
             start()
         }
     }
-    
+
     func cancelRecording() {
-        isRecording = false
-        _ = recorder.stopRecording()
-        hideOverlay()
+        guard let job = jobs.first(where: { $0.state == .recording }) else { return }
+        _ = job.recorder.stopRecording()
+        removeJob(job)
         NSSound(named: "Basso")?.play()
     }
-    
+
     func getAudioLevel() -> Float {
-        return recorder.updateMeters()
+        return jobs.first(where: { $0.state == .recording })?.recorder.updateMeters() ?? -160
     }
-    
+
+    // MARK: - Recording
+
     private func start() {
-        // Capture the frontmost app before we take focus
-        capturedApp = NSWorkspace.shared.frontmostApplication
-        capturedAppIcon = capturedApp?.icon
+        let targetApp = NSWorkspace.shared.frontmostApplication
+        let job = TranscriptionJob(targetApp: targetApp)
+
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             DispatchQueue.main.async {
-                if granted {
-                    NSSound(named: "Basso")?.play()
-                    self.isRecording = true
-                    self.recorder.startRecording()
-                    self.showOverlay()
-                } else {
+                guard granted else {
                     print("Microphone access denied.")
+                    return
                 }
+                NSSound(named: "Basso")?.play()
+                job.recorder.startRecording()
+                self.objectWillChange.send()
+                self.jobs.append(job)
+                self.updateOverlay()
             }
-        }
-    }
-    
-    private func stopAndTranscribe() {
-        NSSound(named: "Pop")?.play()
-        isRecording = false
-        isTranscribing = true
-        processingMessage = "Transcribing"
-        
-        if let audioURL = recorder.stopRecording() {
-            whisper.transcribe(
-                audioURL: audioURL,
-                whisperPath: whisperPath,
-                ffmpegPath: ffmpegPath,
-                model: whisperModel,
-                language: whisperLanguage,
-                initialPrompt: whisperInitialPrompt
-            ) { text in
-                DispatchQueue.main.async {
-                    if let text = text, !text.isEmpty {
-                        self.applyPostProcessing(to: text)
-                    } else {
-                        self.isTranscribing = false
-                        self.hideOverlay()
-                    }
-                }
-            }
-        } else {
-            isTranscribing = false
-            hideOverlay()
         }
     }
 
-    private func applyPostProcessing(to text: String) {
-        let bundleID = capturedApp?.bundleIdentifier
+    private func stopAndTranscribe() {
+        guard let job = jobs.first(where: { $0.state == .recording }) else { return }
+        NSSound(named: "Pop")?.play()
+        job.audioURL = job.recorder.stopRecording()
+        setJobState(job, .queued)
+        processNextQueued()
+    }
+
+    // MARK: - Queue
+
+    /// Starts transcribing the next queued job if no transcription is already running.
+    private func processNextQueued() {
+        guard !isTranscriptionRunning,
+              let job = jobs.first(where: { $0.state == .queued }) else { return }
+        guard let audioURL = job.audioURL else {
+            // Audio file missing — drop the job silently
+            removeJob(job)
+            processNextQueued()
+            return
+        }
+
+        isTranscriptionRunning = true
+        setJobState(job, .transcribing)
+
+        whisper.transcribe(
+            audioURL: audioURL,
+            whisperPath: whisperPath,
+            ffmpegPath: ffmpegPath,
+            model: whisperModel,
+            language: whisperLanguage,
+            initialPrompt: whisperInitialPrompt
+        ) { text in
+            DispatchQueue.main.async {
+                if let text = text, !text.isEmpty {
+                    self.applyPostProcessing(to: text, job: job)
+                } else {
+                    self.isTranscriptionRunning = false
+                    self.removeJob(job)
+                    self.processNextQueued()
+                }
+            }
+        }
+    }
+
+    // MARK: - Post-processing
+
+    private func applyPostProcessing(to text: String, job: TranscriptionJob) {
+        let bundleID = job.targetApp?.bundleIdentifier
         let rule = rulesStore.rule(for: bundleID)
 
         switch rule?.action {
         case .shortcut(let name):
-            processingMessage = "Running Shortcut"
-            runShortcut(name: name, input: text)
+            setJobState(job, .postProcessing("Running Shortcut"))
+            runShortcut(name: name, input: text, job: job)
         case .gemini(let prompt):
             let apiKey = rulesStore.geminiAPIKey
             guard !apiKey.isEmpty else {
                 print("Gemini API key not configured, inserting raw text.")
-                insertText(text, originalText: text, source: nil)
+                insertText(text, originalText: text, source: nil, job: job)
                 return
             }
-            processingMessage = "Processing with Gemini"
+            setJobState(job, .postProcessing("Processing with Gemini"))
             Task {
                 do {
                     let result = try await self.gemini.process(text: text, prompt: prompt, apiKey: apiKey)
-                    await MainActor.run { self.insertText(result, originalText: text, source: "Gemini AI") }
+                    await MainActor.run { self.insertText(result, originalText: text, source: "Gemini AI", job: job) }
                 } catch {
                     print("[Gemini] Error: \(error.localizedDescription)")
-                    await MainActor.run { self.insertText(text, originalText: text, source: nil) }
+                    await MainActor.run { self.insertText(text, originalText: text, source: nil, job: job) }
                 }
             }
         default:
-            insertText(text, originalText: text, source: nil)
+            insertText(text, originalText: text, source: nil, job: job)
         }
     }
 
-    private func runShortcut(name: String, input: String) {
-        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent("whisper_input.txt")
+    private func runShortcut(name: String, input: String, job: TranscriptionJob) {
+        // Use per-job temp file name to avoid collisions between concurrent shortcuts
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("whisper_input_\(job.id.uuidString).txt")
         do {
             try input.write(to: tmpURL, atomically: true, encoding: .utf8)
         } catch {
             print("Failed to write shortcut input: \(error)")
-            insertText(input, originalText: input, source: nil)
+            insertText(input, originalText: input, source: nil, job: job)
             return
         }
 
@@ -167,9 +195,9 @@ class TranscriptionManager: ObservableObject {
             let plain = Self.plainText(from: data).trimmingCharacters(in: .whitespacesAndNewlines)
             DispatchQueue.main.async {
                 if plain.isEmpty {
-                    self?.insertText(input, originalText: input, source: nil)
+                    self?.insertText(input, originalText: input, source: nil, job: job)
                 } else {
-                    self?.insertText(plain, originalText: input, source: "Shortcut: \(name)")
+                    self?.insertText(plain, originalText: input, source: "Shortcut: \(name)", job: job)
                 }
             }
             try? FileManager.default.removeItem(at: tmpURL)
@@ -178,91 +206,39 @@ class TranscriptionManager: ObservableObject {
             try process.run()
         } catch {
             print("Failed to run shortcut: \(error)")
-            insertText(input, originalText: input, source: nil)
+            insertText(input, originalText: input, source: nil, job: job)
         }
     }
 
     /// Converts raw Data that may be RTF, RTFD, or plain UTF-8 text into a plain String.
     private static func plainText(from data: Data) -> String {
-        // Try RTF first
         if let attributed = try? NSAttributedString(data: data,
                                                     options: [.documentType: NSAttributedString.DocumentType.rtf],
                                                     documentAttributes: nil) {
             return attributed.string
         }
-        // Try RTFD
         if let attributed = try? NSAttributedString(data: data,
                                                     options: [.documentType: NSAttributedString.DocumentType.rtfd],
                                                     documentAttributes: nil) {
             return attributed.string
         }
-        // Fall back to plain UTF-8
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    private func showOverlay() {
-        if overlayWindow == nil {
-            let contentView = RecordingOverlayView(manager: self)
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 160, height: 48),
-                styleMask: [.borderless, .fullSizeContentView],
-                backing: .buffered, defer: false)
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.level = .floating
-            window.contentView = NSHostingView(rootView: contentView)
-            overlayWindow = window
-        }
-        // Always reposition to the screen containing the mouse cursor
-        let mouseLocation = NSEvent.mouseLocation
-        let activeScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
-        if let screen = activeScreen {
-            let x = screen.frame.minX + (screen.frame.width - (overlayWindow?.frame.width ?? 160)) / 2
-            let y = screen.frame.minY + screen.frame.height * 0.10
-            overlayWindow?.setFrameOrigin(NSPoint(x: x, y: y))
-        }
-        overlayWindow?.orderFrontRegardless()
-    }
+    // MARK: - Text insertion
 
-    private func hideOverlay() {
-        overlayWindow?.orderOut(nil)
-    }
-    
-    private func addToHistory(_ text: String, processedText: String? = nil, processingSource: String? = nil) {
-        let entry = TranscriptionEntry(text: text, processedText: processedText, processingSource: processingSource, date: Date())
-        history.insert(entry, at: 0)
-        saveHistory()
-    }
-    
-    private func saveHistory() {
-        if let encoded = try? JSONEncoder().encode(history) {
-            UserDefaults.standard.set(encoded, forKey: "transcriptionHistory")
-        }
-    }
-    
-    private func loadHistory() {
-        if let data = UserDefaults.standard.data(forKey: "transcriptionHistory"),
-           let decoded = try? JSONDecoder().decode([TranscriptionEntry].self, from: data) {
-            history = decoded
-        }
-    }
-    
-    private func insertText(_ text: String, originalText: String, source: String?) {
+    private func insertText(_ text: String, originalText: String, source: String?, job: TranscriptionJob) {
         let isDifferent = text != originalText
         addToHistory(originalText, processedText: isDifferent ? text : nil, processingSource: source)
 
         print("Transcription: \(text)")
         NSSound(named: "Glass")?.play()
 
-        // Save the current clipboard contents so we can restore them if the user
-        // has opted out of keeping the result on the clipboard.
         let savedItems: [NSPasteboardItem]? = copyToClipboardEnabled ? nil : {
             NSPasteboard.general.pasteboardItems?.map { item in
                 let copy = NSPasteboardItem()
                 for type in item.types {
-                    if let data = item.data(forType: type) {
-                        copy.setData(data, forType: type)
-                    }
+                    if let data = item.data(forType: type) { copy.setData(data, forType: type) }
                 }
                 return copy
             }
@@ -272,9 +248,8 @@ class TranscriptionManager: ObservableObject {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        // Activate the original app before pasting so the user can switch away
-        // during transcription and the text still lands in the right place.
-        self.capturedApp?.activate(options: [])
+        // Re-focus the original app so paste lands in the right window
+        job.targetApp?.activate(options: [])
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             let source = CGEventSource(stateID: .combinedSessionState)
@@ -282,78 +257,148 @@ class TranscriptionManager: ObservableObject {
             vDown?.flags = .maskCommand
             let vUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
             vUp?.flags = .maskCommand
-
             vDown?.post(tap: .cgAnnotatedSessionEventTap)
             vUp?.post(tap: .cgAnnotatedSessionEventTap)
 
-            self.isTranscribing = false
-            self.hideOverlay()
+            self.isTranscriptionRunning = false
+            self.removeJob(job)
+            self.processNextQueued()
 
-            // Restore clipboard after paste if the user opted out of clipboard copy
             if let saved = savedItems {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     let pb = NSPasteboard.general
                     pb.clearContents()
-                    if !saved.isEmpty {
-                        pb.writeObjects(saved)
-                    }
+                    if !saved.isEmpty { pb.writeObjects(saved) }
                 }
             }
         }
     }
-    
+
+    // MARK: - Overlay
+
+    private func updateOverlay() {
+        guard !jobs.isEmpty else {
+            overlayWindow?.orderOut(nil)
+            return
+        }
+
+        let rowH: CGFloat = 40
+        let divH: CGFloat = 1
+        let padH: CGFloat = 16
+        let count = CGFloat(jobs.count)
+        let height = count * rowH + max(0, count - 1) * divH + padH
+        let width: CGFloat = 230
+
+        if overlayWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                styleMask: [.borderless, .fullSizeContentView],
+                backing: .buffered, defer: false)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.level = .floating
+            window.contentView = NSHostingView(rootView: RecordingOverlayView(manager: self))
+            overlayWindow = window
+
+            // Position once on first show — anchor bottom-center on the active screen
+            let mouseLocation = NSEvent.mouseLocation
+            let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
+            if let screen = screen {
+                let x = screen.frame.minX + (screen.frame.width - width) / 2
+                let y = screen.frame.minY + screen.frame.height * 0.10
+                overlayWindow?.setFrameOrigin(NSPoint(x: x, y: y))
+            }
+        } else {
+            // Keep the same bottom-left origin, just grow the height
+            if let origin = overlayWindow?.frame.origin {
+                overlayWindow?.setFrame(
+                    NSRect(x: origin.x, y: origin.y, width: width, height: height),
+                    display: true, animate: true)
+            }
+        }
+
+        overlayWindow?.orderFrontRegardless()
+    }
+
+    // MARK: - Helpers
+
+    /// Updates a job's state and notifies the manager's observers so the UI refreshes.
+    private func setJobState(_ job: TranscriptionJob, _ state: JobState) {
+        objectWillChange.send()
+        job.state = state
+        updateOverlay()
+    }
+
+    private func removeJob(_ job: TranscriptionJob) {
+        objectWillChange.send()
+        jobs.removeAll { $0.id == job.id }
+        updateOverlay()
+    }
+
+    private func addToHistory(_ text: String, processedText: String? = nil, processingSource: String? = nil) {
+        let entry = TranscriptionEntry(text: text, processedText: processedText, processingSource: processingSource, date: Date())
+        history.insert(entry, at: 0)
+        saveHistory()
+    }
+
+    private func saveHistory() {
+        if let encoded = try? JSONEncoder().encode(history) {
+            UserDefaults.standard.set(encoded, forKey: "transcriptionHistory")
+        }
+    }
+
+    private func loadHistory() {
+        if let data = UserDefaults.standard.data(forKey: "transcriptionHistory"),
+           let decoded = try? JSONDecoder().decode([TranscriptionEntry].self, from: data) {
+            history = decoded
+        }
+    }
+
+    // MARK: - Hotkey
+
     func setupHotkey() {
         print("Setting up FN key monitor...")
-        
+
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
         }
-        
-        // Check for accessibility permissions
+
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         let isTrusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
         print("Accessibility permissions trusted: \(isTrusted)")
-        
+
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             guard let self = self else { return }
-            
             let isFnDown = event.modifierFlags.contains(.function)
-            
             if isFnDown && !self.isFnKeyCurrentlyPressed {
-                // Key Down
                 self.isFnKeyCurrentlyPressed = true
                 self.handleFnDown()
             } else if !isFnDown && self.isFnKeyCurrentlyPressed {
-                // Key Up
                 self.isFnKeyCurrentlyPressed = false
                 self.handleFnUp()
             }
         }
     }
-    
+
     private func handleFnDown() {
         let now = Date()
-        let doublePressThreshold: TimeInterval = 0.4 // Slightly more generous for better detection
-        
+        let doublePressThreshold: TimeInterval = 0.4
+
         DispatchQueue.main.async {
-            // Cancel any pending PTT stop
             self.pttStopTimer?.invalidate()
             self.pttStopTimer = nil
 
             if self.isRecording && self.currentMode == .handsFree {
-                // Single press to stop hands-free
                 print("Stopping hands-free recording...")
                 self.stopAndTranscribe()
                 self.currentMode = .none
             } else if now.timeIntervalSince(self.lastFnDownTime) < doublePressThreshold {
-                // Double press detected!
                 print("Double press detected! Switching to hands-free mode.")
                 self.currentMode = .handsFree
                 if !self.isRecording {
                     self.start()
                 }
             } else {
-                // Start PTT mode
                 print("FN Down: Starting PTT recording...")
                 self.currentMode = .pushToTalk
                 if !self.isRecording {
@@ -363,11 +408,10 @@ class TranscriptionManager: ObservableObject {
             self.lastFnDownTime = now
         }
     }
-    
+
     private func handleFnUp() {
         DispatchQueue.main.async {
             if self.currentMode == .pushToTalk {
-                // Instead of stopping immediately, wait a bit to see if it's a double-press
                 print("FN Up: Waiting to see if it's a double-press...")
                 self.pttStopTimer?.invalidate()
                 self.pttStopTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in

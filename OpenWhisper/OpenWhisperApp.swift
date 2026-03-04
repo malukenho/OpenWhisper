@@ -75,18 +75,28 @@ struct OpenWhisperApp: App {
     
     var body: some Scene {
         MenuBarExtra {
-            if appDelegate.manager.isRecording {
-                Text("🔴 Recording...")
-                Text("Press Stop to transcribe")
-                    .font(.caption)
-            } else if appDelegate.manager.isTranscribing {
-                Text("⌛ Transcribing...")
+            let jobs = appDelegate.manager.jobs
+            let recording = jobs.filter { $0.state == .recording }
+            let queued = jobs.filter { $0.state == .queued }
+            let processing = jobs.filter { job in
+                if case .postProcessing = job.state { return true }
+                return job.state == .transcribing
+            }
+
+            if !recording.isEmpty {
+                Text("🔴 Recording…")
+                if !queued.isEmpty || !processing.isEmpty {
+                    Text("\(queued.count + processing.count) job(s) in queue")
+                        .font(.caption)
+                }
+            } else if !processing.isEmpty || !queued.isEmpty {
+                Text("⌛ Processing… (\(jobs.count) job(s))")
             } else {
                 Text("Ready")
             }
-            
+
             Divider()
-            
+
             Button(appDelegate.manager.isRecording ? "Stop Recording" : "Start Recording") {
                 appDelegate.manager.toggleRecording()
             }
@@ -117,7 +127,7 @@ struct OpenWhisperApp: App {
             if appDelegate.manager.isRecording {
                 Image(systemName: "mic.fill")
                     .symbolRenderingMode(.hierarchical)
-            } else if appDelegate.manager.isTranscribing {
+            } else if !appDelegate.manager.jobs.isEmpty {
                 Image(systemName: "ellipsis.bubble.fill")
                     .symbolRenderingMode(.hierarchical)
             } else {
