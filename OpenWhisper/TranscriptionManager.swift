@@ -400,18 +400,17 @@ class TranscriptionManager: ObservableObject {
     }
 
     private func updateDynamicIslandOverlay(count: CGFloat) {
-        // Compact rows that sit in the notch/menu-bar area at the top of the screen
-        let rowH: CGFloat = 36
+        // Each row: 46pt icon + 13*2 vertical padding = 72pt. Dividers = 0.5pt.
+        let rowH: CGFloat = 72
         let divH: CGFloat = 1
-        let padV: CGFloat = 16    // top+bottom padding inside the pill
-        let height = count * rowH + max(0, count - 1) * divH + padV
-        let width: CGFloat = 280
+        let height = count * rowH + max(0, count - 1) * divH
+        let width: CGFloat = 320
 
         // Primary screen (the one with the menu bar / notch) is always screens[0]
         let screen = NSScreen.screens.first ?? NSScreen.main!
 
-        // Pin the TOP of the window to the very top of the screen so the pill
-        // looks like it grows out of the notch downward.
+        // Pin the TOP of the window flush with the very top of the screen so the
+        // flat-top shape visually merges with the hardware notch.
         let x = screen.frame.minX + (screen.frame.width - width) / 2
         let newFrame = NSRect(x: x, y: screen.frame.maxY - height, width: width, height: height)
 

@@ -25,31 +25,160 @@ struct RecordingOverlayView: View {
 
 // MARK: - Dynamic Island overlay
 
+/// A shape with flat top corners (to merge seamlessly with the hardware notch)
+/// and rounded bottom corners, like the macOS Dynamic Island / Alcove style.
+private struct NotchExpandShape: Shape {
+    var radius: CGFloat = 22
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        // Top edge — completely flat so the view bleeds into the notch
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        // Right edge down to bottom-right curve
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        p.addQuadCurve(
+            to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
+            control: CGPoint(x: rect.maxX, y: rect.maxY))
+        // Bottom edge
+        p.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        // Bottom-left curve
+        p.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: rect.maxY - radius),
+            control: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
 struct DynamicIslandOverlayView: View {
     @ObservedObject var manager: TranscriptionManager
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(manager.jobs.enumerated()), id: \.element.id) { index, job in
-                JobRowView(job: job, compact: true)
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.85, anchor: .top)),
-                            removal: .opacity.combined(with: .scale(scale: 0.85, anchor: .top))
-                        )
-                    )
+                DynamicIslandJobRow(job: job)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top)),
+                        removal: .opacity
+                    ))
                 if index < manager.jobs.count - 1 {
-                    Divider()
-                        .background(Color.white.opacity(0.15))
+                    Rectangle()
+                        .fill(Color.white.opacity(0.10))
+                        .frame(height: 0.5)
                         .transition(.opacity)
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.black)               // solid black to blend with notch
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .animation(.spring(response: 0.38, dampingFraction: 0.72), value: manager.jobs.count)
+        .background(Color.black)
+        .clipShape(NotchExpandShape(radius: 22))
+        .animation(.spring(response: 0.4, dampingFraction: 0.78), value: manager.jobs.count)
+    }
+}
+
+// MARK: - Dynamic Island per-job row (Alcove-style)
+
+struct DynamicIslandJobRow: View {
+    @ObservedObject var job: TranscriptionJob
+
+    @State private var audioLevels: [CGFloat] = [0.25, 0.55, 0.80, 0.45, 0.65]
+    @State private var timerSub: AnyCancellable? = nil
+
+    private var appName: String {
+        job.targetApp?.localizedName ?? "Unknown App"
+    }
+
+    var body: some View {
+        HStack(spacing: 13) {
+            // Large rounded app icon — the visual anchor, like album art in Alcove
+            Group {
+                if let icon = job.appIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                } else {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Color.white.opacity(0.12))
+                }
+            }
+            .frame(width: 46, height: 46)
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+            // Center: app name (title) + state label (subtitle)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(appName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+
+                stateLabel
+            }
+
+            Spacer(minLength: 6)
+
+            // Right-side live indicator
+            stateIndicator
+                .frame(width: 46, alignment: .trailing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .onAppear {
+            let pub = Timer.publish(every: 0.1, on: .main, in: .default).autoconnect()
+            timerSub = pub.sink { _ in
+                guard case .recording = job.state else { return }
+                let level = job.recorder.updateMeters()
+                let v = CGFloat(max(0.08, (level + 60) / 60))
+                withAnimation(.spring(response: 0.12, dampingFraction: 0.5)) {
+                    audioLevels = Array(audioLevels.dropFirst()) + [v]
+                }
+            }
+        }
+        .onDisappear {
+            timerSub?.cancel()
+            timerSub = nil
+        }
+    }
+
+    @ViewBuilder
+    private var stateLabel: some View {
+        switch job.state {
+        case .recording:
+            Text("Recording")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundColor(.white.opacity(0.55))
+        case .queued:
+            Text("Queued")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundColor(.white.opacity(0.38))
+        case .transcribing:
+            ShimmerText(message: "Transcribing…", fontSize: 12)
+        case .postProcessing(let msg):
+            ShimmerText(message: msg, fontSize: 12)
+        }
+    }
+
+    @ViewBuilder
+    private var stateIndicator: some View {
+        switch job.state {
+        case .recording:
+            // Live waveform bars — 5 bars, right-aligned
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(0..<5, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.white)
+                        .frame(width: 3, height: max(5, audioLevels[i] * 34))
+                }
+            }
+            .frame(height: 34)
+        case .queued:
+            Image(systemName: "clock")
+                .font(.system(size: 18, weight: .light))
+                .foregroundColor(.white.opacity(0.30))
+        case .transcribing, .postProcessing:
+            ProgressView()
+                .progressViewStyle(.circular)
+                .scaleEffect(0.7)
+                .tint(.white.opacity(0.6))
+        }
     }
 }
 
