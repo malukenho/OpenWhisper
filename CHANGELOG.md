@@ -8,6 +8,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Mini Dynamic Island overlay style** — A new compact overlay mode that hugs the hardware notch pill. Left side shows a stack of overlapping app icons for all queued jobs (up to 3, plus a count); right side shows an animated green waveform while recording and a `waveform.and.mic` icon while transcribing. Animates out of the notch with a spring bounce on appearance.
+
+### Fixed
+- **Paste targeting** — The target application is now explicitly activated (`activate(options: .activateIgnoringOtherApps)`) before sending Cmd+V, ensuring keyboard focus is restored and the paste always lands in the correct text field. Previously, `postToPid` was used without re-focusing, which silently failed when no input was active.
+
+### Added
 - **Audio recording in history** — Every transcription now saves a persistent copy of the original WAV recording to `~/Library/Application Support/OpenWhisper/Recordings/`. A play/pause button (▶ / ⏹) appears in the history list for entries that have audio. Playback stops automatically when the recording finishes. "Clear All" and per-entry delete also remove the associated audio file.
 - **Dynamic Island overlay style (beta)** — An alternative overlay mode that positions a compact pill at the very top of the display, inside the MacBook notch/menu-bar area, at a window level above the menu bar. Off by default; toggle in **Settings → General → Overlay Style**. Adapts to both styles: compact rows (36 pt) with smaller icons for Dynamic Island, standard rows (40 pt) for Bubble.
 - **Precise window targeting via Accessibility API** — At recording start, OpenWhisper now captures the `AXUIElement` of the focused window (not just the app). When pasting, it raises that specific window within the app's z-order — meaning the correct browser window or iTerm2 pane is always targeted, even if you have multiple open.

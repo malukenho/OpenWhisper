@@ -308,29 +308,24 @@ class TranscriptionManager: ObservableObject {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        // Raise the exact window (e.g. the right browser window or iTerm2 pane)
-        // within the app's z-order — without activating the whole application.
+        // Activate the target app so it regains keyboard focus, then raise the
+        // specific window within it (e.g. the right browser tab / iTerm2 pane).
+        job.targetApp?.activate(options: .activateIgnoringOtherApps)
         if let window = job.targetWindow {
             AXUIElementPerformAction(window, kAXRaiseAction as CFString)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // Wait long enough for the app to become active and restore its focused field.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             let source = CGEventSource(stateID: .combinedSessionState)
             let vDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
             vDown?.flags = .maskCommand
             let vUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
             vUp?.flags = .maskCommand
 
-            // Send Cmd+V directly to the target PID — the app stays in the background.
-            // Fall back to the session tap only if we have no PID.
-            let pid = job.targetPID
-            if pid > 0, let down = vDown, let up = vUp {
-                down.postToPid(pid)
-                up.postToPid(pid)
-            } else {
-                vDown?.post(tap: .cgAnnotatedSessionEventTap)
-                vUp?.post(tap: .cgAnnotatedSessionEventTap)
-            }
+            // Post Cmd+V to the session tap so it reaches the now-active app.
+            vDown?.post(tap: .cgAnnotatedSessionEventTap)
+            vUp?.post(tap: .cgAnnotatedSessionEventTap)
 
             self.isTranscriptionRunning = false
             self.removeJob(job)
@@ -458,9 +453,8 @@ class TranscriptionManager: ObservableObject {
 
     private func updateDynamicIslandMiniOverlay() {
         // Mini style: fixed height (notch height only), expands left+right — never grows downward
-        let height: CGFloat = 30
-        let width: CGFloat = 320
-
+        let height: CGFloat = 32
+        let width: CGFloat = 250  // 40 (left) + 162 (notch) + 40 (right) + 4*2 (padding)
         let screen = NSScreen.screens.first ?? NSScreen.main!
         let screenCenterX = screen.frame.minX + screen.frame.width / 2
 
@@ -476,23 +470,46 @@ class TranscriptionManager: ObservableObject {
             let window = makeOverlayWindow(width: width, height: height, level: level, style: "dynamicIslandMini")
             overlayWindow = window
 
-            // Animate from notch-width outward (left+right expansion)
-            let notchW: CGFloat = 130
+            // Start fully hidden above the screen at notch width, then spring outward+downward
+            let notchW: CGFloat = 162
             let startFrame = NSRect(
                 x: screenCenterX - notchW / 2,
-                y: screen.frame.maxY - height,
+                y: screen.frame.maxY,          // above screen — hidden inside notch
                 width: notchW,
                 height: height
             )
+            overlayWindow?.alphaValue = 0
             overlayWindow?.setFrame(startFrame, display: false)
             overlayWindow?.orderFrontRegardless()
 
+            // Phase 1: fade in instantly as the spring begins
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.35
+                ctx.duration = 0.08
+                ctx.allowsImplicitAnimation = true
+                overlayWindow?.animator().alphaValue = 1
+            }
+
+            // Phase 2: spring outward+downward with overshoot (bounce)
+            let bounceFrame = NSRect(
+                x: targetFrame.minX - 6,
+                y: targetFrame.minY - 5,
+                width: targetFrame.width + 12,
+                height: targetFrame.height
+            )
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.38
                 ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.46, 0.45, 0.94)
                 ctx.allowsImplicitAnimation = true
-                overlayWindow?.animator().setFrame(targetFrame, display: true)
-            }
+                overlayWindow?.animator().setFrame(bounceFrame, display: true)
+            }, completionHandler: {
+                // Phase 3: snap back to final size — this is the "bounce"
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.22
+                    ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.33, 0.0, 0.66, 1.0)
+                    ctx.allowsImplicitAnimation = true
+                    self.overlayWindow?.animator().setFrame(targetFrame, display: true)
+                }
+            })
         }
         // Mini style never resizes on queue changes — the badge conveys the count
     }

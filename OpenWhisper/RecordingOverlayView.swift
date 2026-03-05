@@ -278,35 +278,22 @@ struct DynamicIslandMiniOverlayView: View {
     @ObservedObject var manager: TranscriptionManager
 
     // Approximate width of the hardware notch (camera cutout)
-    private let notchWidth: CGFloat = 130
-    private let iconSize: CGFloat = 18
+    private let notchWidth: CGFloat = 162
 
     var body: some View {
         HStack(spacing: 0) {
-            // ── Left side: app icon ──────────────────────────────────────────
-            Group {
-                if let icon = manager.jobs.first?.appIcon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: iconSize, height: iconSize)
-                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                } else {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.white.opacity(0.15))
-                        .frame(width: iconSize, height: iconSize)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
+            // ── Left side: overlapping app icons (queue) ─────────────────────
+            QueueStackView(jobs: manager.jobs)
+                .frame(width: 40, alignment: .center)
 
             // ── Centre: the hardware notch sits here — leave it clear ────────
             Spacer().frame(width: notchWidth)
 
-            // ── Right side: status indicator ─────────────────────────────────
+            // ── Right side: waveform / transcribing indicator ─────────────────
             miniIndicator
-                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(width: 40, alignment: .center)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 4)
         .frame(maxHeight: .infinity)
         .background(Color.black)
         .clipShape(NotchExpandShape(radius: 16))
@@ -314,33 +301,68 @@ struct DynamicIslandMiniOverlayView: View {
 
     @ViewBuilder
     private var miniIndicator: some View {
-        let totalJobs = manager.jobs.count
         let recordingJob = manager.jobs.first(where: { $0.state == .recording })
 
         if let job = recordingJob {
-            // Live waveform while recording
             MiniWaveformView(recorder: job.recorder)
         } else if manager.isTranscribing {
-            ZStack(alignment: .topTrailing) {
-                // Transcribing icon
-                Image(systemName: "waveform.and.mic")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white.opacity(0.85))
-                    .padding(.trailing, totalJobs > 1 ? 6 : 0)
+            Image(systemName: "waveform.and.mic")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white.opacity(0.85))
+        }
+    }
+}
 
-                // Red queue-count badge when more than one job is in flight
-                if totalJobs > 1 {
-                    ZStack {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 15, height: 15)
-                        Text("\(totalJobs)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                    .offset(x: 7, y: -6)
+// MARK: - Stacked queue icons (overlapping circles)
+
+private struct QueueStackView: View {
+    let jobs: [TranscriptionJob]
+
+    private let iconSize: CGFloat = 20
+    private let overlap: CGFloat = 8
+    private let maxVisible: Int = 3
+
+    var body: some View {
+        let visible = Array(jobs.prefix(maxVisible))
+
+        HStack(spacing: 0) {
+            // Overlapping icon stack
+            ZStack(alignment: .leading) {
+                ForEach(Array(visible.enumerated()), id: \.element.id) { idx, job in
+                    iconCircle(for: job)
+                        .offset(x: CGFloat(idx) * (iconSize - overlap))
+                        .zIndex(Double(maxVisible - idx))
                 }
             }
+            // Fixed total width for the stack so it doesn't shift
+            .frame(width: CGFloat(visible.count) * (iconSize - overlap) + overlap)
+
+            // Count label
+            if jobs.count > 1 {
+                Text("\(jobs.count)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+                    .padding(.leading, 5)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func iconCircle(for job: TranscriptionJob) -> some View {
+        if let icon = job.appIcon {
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: iconSize, height: iconSize)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .stroke(Color.black, lineWidth: 1.5)
+                )
+        } else {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.white.opacity(0.2))
+                .frame(width: iconSize, height: iconSize)
         }
     }
 }
@@ -357,7 +379,7 @@ private struct MiniWaveformView: View {
         HStack(alignment: .center, spacing: 2) {
             ForEach(0..<5, id: \.self) { i in
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.white)
+                    .fill(Color.green)
                     .frame(width: 2.5, height: max(4, levels[i] * 18))
             }
         }

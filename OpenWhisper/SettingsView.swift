@@ -99,13 +99,16 @@ struct GeneralSettingsTab: View {
 
                         Picker("Overlay Style", selection: $overlayStyle) {
                             Label("Bubble", systemImage: "bubble.left.fill").tag("bubble")
-                            Label("Dynamic Island  (beta)", systemImage: "pill.fill").tag("dynamicIsland")
+                            Label("Dynamic Island (beta)", systemImage: "pill.fill").tag("dynamicIsland")
+                            Label("D.I. Mini (beta)", systemImage: "rectangle.topthird.inset.filled").tag("dynamicIslandMini")
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
 
                         Text(overlayStyle == "dynamicIsland"
                              ? "Positions the overlay at the top of the screen inside the notch area, like a Dynamic Island."
+                             : overlayStyle == "dynamicIslandMini"
+                             ? "Compact style: expands only left and right of the notch — icon on the left, status on the right."
                              : "Classic floating pill anchored near the bottom of the screen.")
                             .font(.caption2)
                             .foregroundColor(.secondary)
